@@ -24,7 +24,7 @@ export function makeItem({ file, handle = null, dir = null, kind }) {
     needsPassword: false, password: null,
     range: null,          // null = 전체, 아니면 쪽 번호 배열(1부터)
     state: 'idle', msg: '', progress: 0,
-    pdf: null,            // 엔진·그림으로 만든 PDF(Blob) — 미리 보기·합치기에 다시 쓴다
+    pdf: null,            // DRE.exe·그림으로 만든 PDF(Blob) — 미리 보기·합치기에 다시 쓴다
     pdfPages: null,
     textDoc: null,        // 뽑아 둔 글(문서 모델)과 그때의 쪽 범위
     textKey: null,

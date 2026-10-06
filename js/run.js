@@ -10,14 +10,14 @@ import { OFFICE, IMAGES } from './core/detect.js';
 import { baseName, toast } from './util.js';
 
 let abort = null;
-let starting = false; // 엔진 켜기·폴더 권한을 기다리는 동안 두 번 눌리지 않게
+let starting = false; // DRE.exe 켜기·폴더 권한을 기다리는 동안 두 번 눌리지 않게
 
 // 이 할 일에 넣을 수 있는가(못 하면 까닭)
 export function whyNot(it, mode) {
   if (it.kind === 'unknown') return '알 수 없는 형식입니다';
   if (it.probeError === 'broken') return it.probeMsg || '파일이 손상된 것 같습니다';
   if (it.probeError === 'password' && it.kind !== 'pdf') return '암호가 걸린 문서입니다';
-  if (it.probeError === 'distribution' && mode === 'text') return null; // 배포용 한글: 엔진으로 PDF를 만든 뒤 뽑는다(produce.js)
+  if (it.probeError === 'distribution' && mode === 'text') return null; // 배포용 한글: DRE.exe로 PDF를 만든 뒤 뽑는다(produce.js)
   if (it.probeError === 'drm') return '보안(DRM)이 걸린 문서입니다';
   if (it.range && !it.range.length) return '고른 쪽이 없습니다';
   if (mode === 'pdf') {
@@ -52,7 +52,7 @@ function failMsg(e) {
   return (e && e.message) || '실패했습니다';
 }
 
-// 실행 버튼(사용자가 누른 순간 불린다 — 엔진 켜기·저장 폴더 권한은 이때만 물을 수 있다)
+// 실행 버튼(사용자가 누른 순간 불린다 — DRE.exe 켜기·저장 폴더 권한은 이때만 물을 수 있다)
 export async function runAll() {
   if (store.running || starting) return;
   const mode = store.mode;
@@ -68,7 +68,7 @@ export async function runAll() {
 
 async function runInner(mode, items) {
 
-  // 엔진이 필요한데 꺼져 있으면 지금 켠다
+  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다
   const wantEngine = items.some((it) => needsEngine(it) && (mode !== 'text' || !['hwp', 'hwpx', 'docx', 'doc'].includes(it.kind) || it.range));
   let enginePromise = null;
   if (wantEngine && !engineReady()) enginePromise = launchEngine();
@@ -82,10 +82,10 @@ async function runInner(mode, items) {
     return;
   }
   if (enginePromise) {
-    setStatus('DRE 엔진을 켜는 중…');
+    setStatus('DRE를 켜는 중…');
     if (!(await enginePromise)) {
       setStatus('');
-      toast('DRE 엔진을 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.', { bad: true, ms: 6000 });
+      toast('DRE를 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.', { bad: true, ms: 6000 });
       import('./ui/dialogs.js').then((m) => m.openEngineDialog());
     }
   }
@@ -147,7 +147,7 @@ export function stopAll() {
 
 async function convertOne(it, session) {
   const signal = abort.signal;
-  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '엔진 대기 중' : s === 'engine' ? (it.kind.startsWith('hwp') ? '한글로 PDF 만드는 중' : '프로그램으로 PDF 만드는 중') : '' });
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' ? (it.kind.startsWith('hwp') ? '한글로 PDF 만드는 중' : '프로그램으로 PDF 만드는 중') : '' });
   let pdf = await ensurePdf(it, { signal, onState });
   let name = `${baseName(it.name)}.pdf`;
   if (it.range) {
@@ -163,7 +163,7 @@ async function convertOne(it, session) {
 
 async function textOne(it, session) {
   const signal = abort.signal;
-  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '엔진 대기 중' : s === 'engine' ? '쪽 맞추려고 PDF 만드는 중' : '글 뽑는 중' });
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' ? '쪽 맞추려고 PDF 만드는 중' : '글 뽑는 중' });
   const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v) => updateItem(it, { progress: v }) });
   const text = render(doc, renderOptions(), it.range ? new Set(it.range) : null);
   const blob = textBlob(text, { bom: settings.bom });
@@ -185,7 +185,7 @@ async function mergeAll(items, session) {
     try {
       let file = it.file, kind = it.kind;
       if (OFFICE.has(it.kind)) {
-        file = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '엔진 대기 중' : 'PDF 만드는 중' }) });
+        file = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : 'PDF 만드는 중' }) });
         kind = 'pdf';
       } else if (!IMAGES.has(it.kind) && it.kind !== 'pdf') {
         throw Object.assign(new Error('합칠 수 없는 형식입니다'), { code: 'unsupported' });

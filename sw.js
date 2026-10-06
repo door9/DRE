@@ -1,6 +1,6 @@
 // DRE 서비스워커 — 인터넷이 없어도 앱이 열리게 앱 파일을 보관한다.
 // 같은 주소(door9.github.io)의 다른 앱 캐시를 건드리지 않도록 dre- 로 시작하는 것만 정리한다.
-const VERSION = 'c52718f5c6';
+const VERSION = '8e2fc5529d';
 const CACHE = `dre-shell-${VERSION}`;
 const RUNTIME = 'dre-runtime-1';
 
@@ -126,11 +126,11 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // 다른 주소(엔진 127.0.0.1 등)는 건드리지 않는다
+  if (url.origin !== self.location.origin) return; // 다른 주소(DRE.exe 127.0.0.1 등)는 건드리지 않는다
   const scope = new URL(self.registration.scope);
   if (!url.pathname.startsWith(scope.pathname)) return;
   const rel = url.pathname.slice(scope.pathname.length);
-  if (rel.startsWith('v1/') || rel.startsWith('engine/') || rel.startsWith('_dev/')) return; // 엔진 API·내려받기·개발 파일
+  if (rel.startsWith('v1/') || rel.startsWith('engine/') || rel.startsWith('_dev/')) return; // DRE.exe API·내려받기·개발 파일
   event.respondWith((async () => {
     // 앱 파일은 모두 미리 보관해 두었다(PDF 부품 포함) — 인터넷 없이도 그대로 열린다
     const hit = (await caches.match(rel === '' ? './' : rel, { cacheName: CACHE, ignoreSearch: true }))

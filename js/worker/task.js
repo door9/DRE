@@ -95,7 +95,7 @@ const handlers = {
     }
     const model = await parseOffice(kind, bytes, (v) => onProgress(v * (alignPdf ? 0.5 : 1)));
     if (alignPdf) {
-      // 엔진이 만든 PDF 로 쪽 번호를 정확히 맞춘다
+      // DRE.exe가 만든 PDF 로 쪽 번호를 정확히 맞춘다
       const { task, doc } = await openPdf(new Uint8Array(await alignPdf.arrayBuffer()));
       try {
         const texts = await pageTexts(doc, { isCancelled });

@@ -1,9 +1,9 @@
-// DRE 엔진 부르기 — 이 PC에 설치된 작은 프로그램(DreEngine.exe)이 한글·워드·엑셀·파워포인트로 PDF를 만든다.
-// 엔진은 127.0.0.1(이 PC 안)에서만 듣는다. 꺼져 있으면 'dre-engine://' 주소로 켤 수 있다(크롬이 한 번 물어봄).
+// PC의 DRE 부르기 — 이 PC에 설치된 작은 프로그램(DRE.exe)이 한글·워드·엑셀·파워포인트로 PDF를 만든다.
+// DRE.exe는 127.0.0.1(이 PC 안)에서만 듣는다. 꺼져 있으면 'dre://' 주소로 켤 수 있다(크롬이 한 번 물어봄).
 import { local, sleep } from './util.js';
 
 const PORTS = [41730, 41731, 41732];
-// 앱이 엔진이 내보낸 PC 안 주소(127.0.0.1:41730)에서 열렸나 — 그러면 같은 주소로 바로 이야기한다
+// 앱이 DRE.exe가 내보낸 PC 안 주소(127.0.0.1:41730)에서 열렸나 — 그러면 같은 주소로 바로 이야기한다
 export const SERVED_BY_ENGINE = ['127.0.0.1', 'localhost'].includes(location.hostname) && PORTS.includes(+location.port);
 const hostFor = (port) => (SERVED_BY_ENGINE && +location.port === port ? location.origin : `http://127.0.0.1:${port}`);
 const listeners = new Set();
@@ -44,11 +44,11 @@ export function checkEngine({ quiet = false } = {}) {
   return checking;
 }
 
-// 엔진 켜기 — 반드시 사용자가 누른 순간에 불러야 한다(브라우저 규칙)
+// DRE.exe 켜기 — 반드시 사용자가 누른 순간에 불러야 한다(브라우저 규칙)
 export async function launchEngine() {
   set({ status: 'starting' });
   const a = document.createElement('a');
-  a.href = 'dre-engine://start';
+  a.href = 'dre://start';
   a.style.display = 'none';
   document.body.append(a);
   a.click();
@@ -64,7 +64,7 @@ export async function launchEngine() {
 
 export function engineReady() { return engine.status === 'on'; }
 
-// 이 형식을 엔진이 바꿀 수 있나(프로그램이 깔려 있나)
+// 이 형식을 DRE.exe가 바꿀 수 있나(프로그램이 깔려 있나)
 export function engineCan(kind) {
   const a = engine.apps || {};
   if (['hwp', 'hwp3', 'hwpx'].includes(kind)) return !!a.hwp;
@@ -75,10 +75,10 @@ export function engineCan(kind) {
   return false;
 }
 
-// 변환: blob → PDF(또는 to 형식) Blob. signal 로 중지하면 엔진도 그 일을 버린다
+// 변환: blob → PDF(또는 to 형식) Blob. signal 로 중지하면 DRE.exe도 그 일을 버린다
 export async function engineConvert(blob, name, to = 'pdf', { signal } = {}) {
   if (engine.status !== 'on') await checkEngine({ quiet: true });
-  if (engine.status !== 'on') throw Object.assign(new Error('DRE 엔진이 꺼져 있습니다'), { code: 'engine_off' });
+  if (engine.status !== 'on') throw Object.assign(new Error('DRE가 꺼져 있습니다'), { code: 'engine_off' });
   set({ busy: true });
   let r;
   try {
@@ -89,18 +89,18 @@ export async function engineConvert(blob, name, to = 'pdf', { signal } = {}) {
     set({ busy: false });
     if (signal && signal.aborted) throw Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
     await checkEngine({ quiet: true });
-    throw Object.assign(new Error('DRE 엔진과 연결이 끊겼습니다'), { code: 'engine_off' });
+    throw Object.assign(new Error('DRE와 연결이 끊겼습니다'), { code: 'engine_off' });
   }
   set({ busy: false });
   if (!r.ok) {
     let j = {};
     try { j = await r.json(); } catch { /* 글이 아님 */ }
-    throw Object.assign(new Error(j.message || `엔진 오류(${r.status})`), { code: j.error || 'engine_error' });
+    throw Object.assign(new Error(j.message || `DRE 오류(${r.status})`), { code: j.error || 'engine_error' });
   }
   return r.blob();
 }
 
-// 화면을 다시 볼 때 엔진 상태를 새로(너무 자주는 말고)
+// 화면을 다시 볼 때 DRE.exe 상태를 새로(너무 자주는 말고)
 let lastCheck = 0;
 export function watchEngine() {
   const again = () => { if (Date.now() - lastCheck > 4000) { lastCheck = Date.now(); checkEngine({ quiet: true }); } };

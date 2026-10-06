@@ -55,7 +55,7 @@ export const OFFICE = new Set(['hwp', 'hwp3', 'hwpx', 'doc', 'docx', 'rtf', 'odt
 export const TEXTABLE = new Set(['pdf', 'hwp', 'hwpx', 'doc', 'docx']); // 앱이 직접 글을 뽑을 수 있는 것
 export const IMAGES = new Set(['jpg', 'png', 'gif', 'bmp', 'webp']);
 
-// 엔진(한글·워드…)에게 보낼 때 쓸 확장자
+// DRE.exe(한글·워드…)에게 보낼 때 쓸 확장자
 export function engineExt(kind) {
   return { hwp3: 'hwp' }[kind] || kind;
 }

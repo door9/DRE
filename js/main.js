@@ -86,7 +86,7 @@ async function main() {
   syncSaveTarget();
   watchEngine();
 
-  // 오프라인용 보관(서비스워커): PC 안 주소(엔진이 내보냄)·공개 주소 모두. 개발 서버(8410)만 뺀다
+  // 오프라인용 보관(서비스워커): PC 안 주소(DRE.exe가 내보냄)·공개 주소 모두. 개발 서버(8410)만 뺀다
   if ('serviceWorker' in navigator && window.isSecureContext && location.port !== '8410') {
     navigator.serviceWorker.register('sw.js').then((reg) => {
       reg.addEventListener('updatefound', () => {

@@ -36,7 +36,7 @@ function rangeSection(it, { open = true } = {}) {
     h('button.btn.tiny', { type: 'button', text: '홀수', onclick: () => commitFn((n) => n % 2 === 1) }),
     h('button.btn.tiny', { type: 'button', text: '짝수', onclick: () => commitFn((n) => n % 2 === 0) }),
     status,
-    infoToggle('<p>쪽 그림을 누르면 고르거나 뺍니다. <b>Shift</b>를 누른 채 누르면 사이의 쪽을 한꺼번에 고릅니다.</p><p>칸에 직접 적어도 됩니다: <code>1-3, 5, 8-</code>(8쪽부터 끝까지).</p><p>한글·워드 문서의 쪽 그림은 DRE 엔진이 PDF로 바꿔 보여 줍니다.</p>'),
+    infoToggle('<p>쪽 그림을 누르면 고르거나 뺍니다. <b>Shift</b>를 누른 채 누르면 사이의 쪽을 한꺼번에 고릅니다.</p><p>칸에 직접 적어도 됩니다: <code>1-3, 5, 8-</code>(8쪽부터 끝까지).</p><p>한글·워드 문서의 쪽 그림은 DRE가 PDF로 바꿔 보여 줍니다.</p>'),
   );
   wrap.append(head);
   const grid = h('div.thumbs');
@@ -110,9 +110,9 @@ function rangeSection(it, { open = true } = {}) {
       if (!engineReady()) {
         note.innerHTML = '';
         note.append(
-          h('div', { text: `${kindLabel(it.kind)} 문서의 쪽 그림을 보려면 DRE 엔진이 켜져 있어야 합니다.` }),
+          h('div', { text: `${kindLabel(it.kind)} 문서의 쪽 그림을 보려면 DRE가 켜져 있어야 합니다.` }),
           h('div', { text: it.pages ? `(문서 안 정보로 어림한 쪽 수: 약 ${it.pages}쪽 — 칸에 직접 적어 고를 수 있습니다)` : '' }),
-          h('button.btn', { type: 'button', style: 'margin-top:8px', html: `${ico('plug')}엔진 켜기`, onclick: () => launchEngine() }),
+          h('button.btn', { type: 'button', style: 'margin-top:8px', html: `${ico('plug')}DRE 켜기`, onclick: () => launchEngine() }),
         );
         return;
       }
@@ -251,7 +251,7 @@ function textSection(it) {
       doc = await ensureText(it, {
         range: it.range, signal: ac.signal,
         onProgress: (v) => { if (textAbort === ac) stat.textContent = `글 뽑는 중… ${Math.round(v * 100)}%`; },
-        onState: (s) => { if (textAbort === ac) stat.textContent = s === 'engine' ? '쪽을 맞추려고 PDF 만드는 중…' : s === 'engine-wait' ? '엔진 대기 중…' : '글 뽑는 중…'; },
+        onState: (s) => { if (textAbort === ac) stat.textContent = s === 'engine' ? '쪽을 맞추려고 PDF 만드는 중…' : s === 'engine-wait' ? '차례 기다리는 중…' : '글 뽑는 중…'; },
       });
       if (textAbort !== ac || current !== it) return;
       draw();
@@ -370,7 +370,7 @@ export function setupSide() {
     if (it === current && it.probed && !current._probedDrawn) { current._probedDrawn = true; renderSide(); }
   });
   onEngine(() => {
-    // 엔진이 켜지면 쪽 그림을 다시 시도
+    // DRE.exe가 켜지면 쪽 그림을 다시 시도
     const it = current;
     if (it && engineReady() && OFFICE.has(it.kind) && !it.pdf && !thumbState) {
       const sec = side().querySelector('.range-sec');

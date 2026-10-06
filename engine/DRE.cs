@@ -1,6 +1,6 @@
-// DRE 엔진 — 이 PC의 한글·워드·엑셀·파워포인트로 문서를 PDF로 바꿔 주는 작은 로컬 서버.
+// DRE(PC 프로그램) — 이 PC의 한글·워드·엑셀·파워포인트로 문서를 PDF로 바꿔 주는 작은 로컬 서버.
 // 127.0.0.1 에서만 듣고, 허락된 주소(DRE 앱)에서 온 요청만 받는다.
-// 일이 없으면 오피스 프로그램을 닫아 메모리를 돌려주고, 오래 쉬면 엔진도 스스로 끝난다.
+// 일이 없으면 오피스 프로그램을 닫아 메모리를 돌려주고, 오래 쉬면 DRE.exe도 스스로 끝난다.
 // 빌드: engine\build.ps1 (윈도우에 기본으로 있는 .NET Framework 4 컴파일러 사용, C# 5 문법)
 using System;
 using System.Collections.Generic;
@@ -19,8 +19,8 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("DRE 엔진")]
-[assembly: AssemblyDescription("DRE 문서 변환 엔진")]
+[assembly: AssemblyTitle("DRE")]
+[assembly: AssemblyDescription("DRE — 문서 변환")]
 [assembly: AssemblyProduct("DRE")]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
@@ -31,9 +31,11 @@ namespace Dre
     {
         public const string Version = "1.0.0";
         public static readonly int[] Ports = { 41730, 41731, 41732 };
-        public const string Protocol = "dre-engine";
+        public const string Protocol = "dre";
+        public const string OldProtocol = "dre-engine"; // 옛 이름(DRE 엔진) 시절 등록 — 설치·지우기 때 정리
         public static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DRE");
-        public static readonly string InstalledExe = Path.Combine(Home, "DreEngine.exe");
+        public static readonly string InstalledExe = Path.Combine(Home, "DRE.exe");
+        public static readonly string OldExe = Path.Combine(Home, "DreEngine.exe"); // 옛 이름
         public static Settings Config;
         public static HttpServer Server;
         public static Converter Conv;
@@ -57,7 +59,7 @@ namespace Dre
             single = new Mutex(true, "Local\\DRE.Engine.v1", out created);
             if (!created)
             {
-                // 이미 켜져 있음. '--open'(시작 메뉴 DRE)이면 켜져 있는 엔진의 앱 주소를 연다
+                // 이미 켜져 있음. '--open'(시작 메뉴 DRE)이면 켜져 있는 DRE.exe의 앱 주소를 연다
                 if (openAfter) { int port = Installer.RunningPort(); OpenUrl("http://127.0.0.1:" + (port > 0 ? port : Ports[0]) + "/"); }
                 return 0;
             }
@@ -65,8 +67,8 @@ namespace Dre
             // 설치되지 않은 곳(다운로드 폴더 등)에서 처음 실행하면 설치를 권한다
             if ((arg == "" || openAfter) && !SamePath(Application.ExecutablePath, InstalledExe) && !File.Exists(InstalledExe) && !AppFiles.DevMode)
             {
-                var r = MessageBox.Show("DRE를 이 PC에 설치할까요?\n\n인터넷 없이도 PC 안에서 열리는 문서 변환 앱과, 한글·워드 문서를 PDF로 바꾸는 엔진이 함께 설치됩니다(관리자 권한 필요 없음).\n설치 위치: " + Home,
-                    "DRE 엔진", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+                var r = MessageBox.Show("DRE를 이 PC에 설치할까요?\n\n인터넷 없이도 PC 안에서 열리는 문서 변환 앱과, 한글·워드 문서를 PDF로 바꾸는 기능이 함께 설치됩니다(관리자 권한 필요 없음).\n설치 위치: " + Home,
+                    "DRE", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
                 if (r != DialogResult.OK) return 0;
                 single.ReleaseMutex(); single.Dispose(); single = null;
                 return Installer.Install(false);
@@ -84,7 +86,7 @@ namespace Dre
             if (!Server.Start())
             {
                 Log.Write("포트를 열지 못함");
-                MessageBox.Show("DRE 엔진을 시작하지 못했습니다.\n다른 프로그램이 통신 자리(포트 41730~41732)를 쓰고 있습니다.", "DRE 엔진", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("DRE를 시작하지 못했습니다.\n다른 프로그램이 통신 자리(포트 41730~41732)를 쓰고 있습니다.", "DRE", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return 1;
             }
             Log.Write("시작 " + Version + " port=" + Server.Port + " app=" + AppFiles.Dir);
@@ -123,7 +125,7 @@ namespace Dre
             t.IsBackground = true; t.Start();
         }
 
-        // 앱 주소: 설정에 따로 적지 않았으면 엔진이 내보내는 PC 안 주소
+        // 앱 주소: 설정에 따로 적지 않았으면 DRE.exe가 내보내는 PC 안 주소
         public static string AppUrl
         {
             get
@@ -200,7 +202,7 @@ namespace Dre
             try
             {
                 var sb = new StringBuilder();
-                sb.AppendLine("# DRE 엔진 설정");
+                sb.AppendLine("# DRE 설정");
                 if (!string.IsNullOrEmpty(AppUrl)) sb.AppendLine("app_url=" + AppUrl);
                 sb.AppendLine("idle_exit_minutes=" + IdleExitMinutes);
                 foreach (var o in ExtraOrigins) sb.AppendLine("extra_origin=" + o);
@@ -212,7 +214,7 @@ namespace Dre
 
     // ───────────────────────── 앱 파일 ─────────────────────────
     // 빌드할 때 web 폴더를 app.zip 으로 묶어 실행 파일 안에 넣는다. 설치·시작 때 %LOCALAPPDATA%\DRE\app 에 푼다(판이 바뀌었을 때만).
-    // 저장소의 web\engine\DreEngine.exe 로 바로 실행하면(개발) web 폴더를 그대로 내보낸다.
+    // 저장소의 web\engine\DRE.exe 로 바로 실행하면(개발) web 폴더를 그대로 내보낸다.
     static class AppFiles
     {
         public static string Dir;
@@ -224,7 +226,7 @@ namespace Dre
                 try
                 {
                     string exeDir = Path.GetDirectoryName(Application.ExecutablePath);
-                    return File.Exists(Path.Combine(exeDir, "..", "index.html")) && File.Exists(Path.Combine(exeDir, "DreEngine.cs"));
+                    return File.Exists(Path.Combine(exeDir, "..", "index.html")) && File.Exists(Path.Combine(exeDir, "DRE.cs"));
                 }
                 catch { return false; }
             }
@@ -306,7 +308,9 @@ namespace Dre
     static class Installer
     {
         const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DRE-Engine";
+        const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DRE";
+        const string OldUninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DRE-Engine";
+        const string RunValue = "DRE", OldRunValue = "DRE-Engine";
 
         public static int Install(bool quiet)
         {
@@ -323,13 +327,15 @@ namespace Dre
                         catch (IOException) { Thread.Sleep(300); if (i == 19) throw; }
                     }
                 }
+                bool oldAuto = RemoveOld();
+                bool wasAuto = oldAuto || IsAutoStart();
                 RegisterProtocol();
                 AppFiles.Ensure(true);
                 bool first = !File.Exists(StartMenuLink);
                 MakeStartMenuLink();
                 using (var k = Registry.CurrentUser.CreateSubKey(UninstallKey))
                 {
-                    k.SetValue("DisplayName", "DRE 엔진");
+                    k.SetValue("DisplayName", "DRE");
                     k.SetValue("DisplayVersion", Program.Version);
                     k.SetValue("Publisher", "DRE");
                     k.SetValue("DisplayIcon", Program.InstalledExe);
@@ -341,7 +347,7 @@ namespace Dre
                     k.SetValue("EstimatedSize", 200, RegistryValueKind.DWord);
                 }
                 // 이미 자동 실행으로 등록돼 있었다면 새 위치를 가리키게
-                if (IsAutoStart()) SetAutoStart(true);
+                if (wasAuto) SetAutoStart(true);
                 Log.Write("설치 " + Program.Version);
                 Process.Start(new ProcessStartInfo(Program.InstalledExe, quiet ? Program.Protocol + "://start" : "--open") { UseShellExecute = false });
                 if (!quiet) MessageBox.Show("DRE를 설치했습니다.\n\n시작 메뉴의 'DRE'로 열 수 있습니다(인터넷 없이 PC 안에서 열림).\n브라우저 주소창 오른쪽의 '앱 설치' 단추를 누르면 바탕 화면 앱처럼 쓸 수 있습니다.", "DRE", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -350,18 +356,19 @@ namespace Dre
             catch (Exception e)
             {
                 Log.Write("설치 실패 " + e);
-                if (!quiet) MessageBox.Show("설치하지 못했습니다.\n" + e.Message, "DRE 엔진", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!quiet) MessageBox.Show("설치하지 못했습니다.\n" + e.Message, "DRE", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
         }
 
         public static int Uninstall(bool quiet)
         {
-            if (!quiet && MessageBox.Show("DRE 엔진을 이 PC에서 지울까요?", "DRE 엔진", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return 0;
+            if (!quiet && MessageBox.Show("DRE를 이 PC에서 지울까요?", "DRE", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return 0;
             AskRunningToQuit();
             try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + Program.Protocol, false); } catch { }
             try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch { }
             SetAutoStart(false);
+            RemoveOld();
             try { if (File.Exists(StartMenuLink)) File.Delete(StartMenuLink); } catch { }
             // 실행 중인 자기 자신은 바로 못 지우므로 잠시 뒤 지운다
             try
@@ -371,15 +378,34 @@ namespace Dre
                 Process.Start(psi);
             }
             catch { }
-            if (!quiet) MessageBox.Show("DRE 엔진을 지웠습니다.", "DRE 엔진", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (!quiet) MessageBox.Show("DRE를 지웠습니다.", "DRE", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 0;
+        }
+
+        // 옛 이름(DRE 엔진: DreEngine.exe, dre-engine://, 앱 목록 'DRE 엔진')으로 깔린 흔적을 지운다. 옛 자동 실행이 켜져 있었으면 true
+        static bool RemoveOld()
+        {
+            bool hadAuto = false;
+            try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + Program.OldProtocol, false); } catch { }
+            try { Registry.CurrentUser.DeleteSubKeyTree(OldUninstallKey, false); } catch { }
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                    if (k != null && k.GetValue(OldRunValue) != null) { hadAuto = true; k.DeleteValue(OldRunValue); }
+            }
+            catch { }
+            for (int i = 0; i < 10 && File.Exists(Program.OldExe); i++)
+            {
+                try { File.Delete(Program.OldExe); } catch { Thread.Sleep(300); }
+            }
+            return hadAuto;
         }
 
         static void RegisterProtocol()
         {
             using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + Program.Protocol))
             {
-                k.SetValue("", "URL:DRE 엔진");
+                k.SetValue("", "URL:DRE");
                 k.SetValue("URL Protocol", "");
                 using (var ic = k.CreateSubKey("DefaultIcon")) ic.SetValue("", "\"" + Program.InstalledExe + "\",0");
                 using (var c = k.CreateSubKey(@"shell\open\command")) c.SetValue("", "\"" + Program.InstalledExe + "\" \"%1\"");
@@ -391,7 +417,7 @@ namespace Dre
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "DRE.lnk"); }
         }
 
-        // 시작 메뉴 'DRE' — 엔진을 켜고(켜져 있으면 그대로) 앱 주소를 연다
+        // 시작 메뉴 'DRE' — DRE.exe를 켜고(켜져 있으면 그대로) 앱 주소를 연다
         static void MakeStartMenuLink()
         {
             try
@@ -412,7 +438,7 @@ namespace Dre
             catch (Exception e) { Log.Write("바로가기 만들기 실패 " + e.Message); }
         }
 
-        // 켜져 있는 엔진의 포트(없으면 0)
+        // 켜져 있는 DRE.exe의 포트(없으면 0)
         public static int RunningPort()
         {
             foreach (int p in Program.Ports)
@@ -440,7 +466,7 @@ namespace Dre
 
         public static bool IsAutoStart()
         {
-            using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue("DRE-Engine") != null;
+            using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue(RunValue) != null;
         }
 
         public static void SetAutoStart(bool on)
@@ -449,8 +475,8 @@ namespace Dre
             {
                 using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
-                    if (on) k.SetValue("DRE-Engine", "\"" + Program.InstalledExe + "\" " + Program.Protocol + "://autostart");
-                    else if (k.GetValue("DRE-Engine") != null) k.DeleteValue("DRE-Engine");
+                    if (on) k.SetValue(RunValue, "\"" + Program.InstalledExe + "\" " + Program.Protocol + "://autostart");
+                    else if (k.GetValue(RunValue) != null) k.DeleteValue(RunValue);
                 }
             }
             catch (Exception e) { Log.Write("자동 실행 설정 실패 " + e.Message); }
@@ -501,7 +527,7 @@ namespace Dre
         {
             icon = new NotifyIcon();
             icon.Icon = MakeIcon();
-            icon.Text = "DRE 엔진";
+            icon.Text = "DRE";
             var menu = new ContextMenuStrip();
             var open = new ToolStripMenuItem("DRE 열기");
             open.Font = new Font(open.Font, FontStyle.Bold);
@@ -681,7 +707,7 @@ namespace Dre
                 catch (Exception e)
                 {
                     Log.Write("요청 처리 오류 " + e.Message);
-                    try { if (ns != null) SendJson(ns, null, 500, "{\"error\":\"internal\",\"message\":\"엔진 내부 오류\"}"); } catch { }
+                    try { if (ns != null) SendJson(ns, null, 500, "{\"error\":\"internal\",\"message\":\"DRE 내부 오류\"}"); } catch { }
                 }
             }
         }
@@ -808,7 +834,7 @@ namespace Dre
             string root = AppFiles.Dir;
             if (root == null || !Directory.Exists(root))
             {
-                var html = Encoding.UTF8.GetBytes("<!doctype html><meta charset=utf-8><title>DRE</title><body style=\"font:15px sans-serif;padding:24px\">DRE 엔진이 켜져 있습니다(" + Program.Version + "). 앱 파일이 없습니다 — 엔진을 다시 설치해 주세요.</body>");
+                var html = Encoding.UTF8.GetBytes("<!doctype html><meta charset=utf-8><title>DRE</title><body style=\"font:15px sans-serif;padding:24px\">DRE가 켜져 있습니다(" + Program.Version + "). 앱 파일이 없습니다 — DRE를 다시 설치해 주세요.</body>");
                 Send(ns, 404, "Not Found", "text/html; charset=utf-8", html, null);
                 return;
             }
@@ -1220,7 +1246,7 @@ namespace Dre
                 if (Array.IndexOf(WordExt, ext) >= 0) return "워드(또는 한글) 프로그램이 없어 워드 문서를 바꿀 수 없습니다";
                 if (Array.IndexOf(ExcelExt, ext) >= 0) return "엑셀 프로그램이 없습니다";
                 if (Array.IndexOf(PptExt, ext) >= 0) return "파워포인트 프로그램이 없습니다";
-                return "엔진이 다룰 수 없는 파일 형식입니다(." + ext + ")";
+                return "DRE가 다룰 수 없는 파일 형식입니다(." + ext + ")";
             }
             if (to == "hwpx" && app != "hwp") return "HWPX로는 한글 문서만 바꿀 수 있습니다";
             if (to == "docx" && app != "word") return "DOCX로는 워드 문서만 바꿀 수 있습니다";
@@ -1641,7 +1667,7 @@ namespace Dre
         [DllImport("kernel32.dll")]
         static extern bool SetProcessWorkingSetSize(IntPtr proc, IntPtr min, IntPtr max);
 
-        // 쉬는 동안 엔진이 잡고 있는 메모리를 운영체제에 돌려준다
+        // 쉬는 동안 DRE.exe가 잡고 있는 메모리를 운영체제에 돌려준다
         public static void TrimMemory()
         {
             try

@@ -1,4 +1,4 @@
-// 대화 상자 — 설정, DRE 엔진 안내
+// 대화 상자 — 설정, PC의 DRE 안내
 import { settings, saveSettings, applyTheme } from '../settings.js';
 import { engine, checkEngine, launchEngine, onEngine, SERVED_BY_ENGINE } from '../engine.js';
 import { h, ico, infoToggle, toast } from '../util.js';
@@ -44,23 +44,23 @@ export function openEngineDialog() {
   fill();
   const off = onEngine(fill);
   const body = h('div.dlg-body', { 'data-info-host': '' },
-    h('p', { style: 'margin-top:0' }, '한글·워드·엑셀·파워포인트 문서를 PDF로 바꿀 때는 이 PC에 깔린 프로그램을 씁니다. 그 다리 역할을 하는 작은 프로그램이 ', h('b', { text: 'DRE 엔진' }), '입니다. ', infoToggle(
+    h('p', { style: 'margin-top:0' }, '한글·워드·엑셀·파워포인트 문서를 PDF로 바꿀 때는 이 PC에 깔린 프로그램을 씁니다. 그 다리 역할을 하는 작은 프로그램이 이 PC에 설치하는 ', h('b', { text: 'DRE' }), '입니다. ', infoToggle(
       `<p>원본과 똑같은 모양의 PDF를 만들려면 문서를 만든 프로그램(한글·워드)이 직접 그려야 합니다. 브라우저만으로는 한글 문서를 정확히 그릴 수 없어서, DRE는 이 PC의 프로그램을 숨긴 채 불러 PDF를 만듭니다.</p>
-       <p>엔진은 이 PC 안(127.0.0.1)에서만 듣고, DRE 앱에서 온 요청만 받습니다. 쉴 때는 메모리를 거의 쓰지 않고, 일이 끝나면 한글·워드를 1분 안에 닫습니다. 30분 동안 일이 없으면 엔진도 스스로 꺼집니다(알림 영역 아이콘 메뉴에서 바꿀 수 있음).</p>
-       <p>글 뽑기(TXT)와 PDF 합치기·쪽 뽑기는 엔진 없이도 됩니다. 엔진이 필요한 것은 한글·워드 등을 PDF로 바꿀 때뿐입니다.</p>
-       <p>크롬이 '이 기기의 다른 앱과 서비스에 접근'을 물으면 <b>허용</b>을 눌러야 앱이 엔진과 이야기할 수 있습니다(한 번만). 엔진을 처음 켤 때 'DreEngine.exe를 열까요?'에서 '항상 허용'에 표시해 두면 다음부터 묻지 않습니다.</p>`)),
+       <p>이 프로그램은 이 PC 안(127.0.0.1)에서만 듣고, DRE 앱에서 온 요청만 받습니다. 쉴 때는 메모리를 거의 쓰지 않고, 일이 끝나면 한글·워드를 1분 안에 닫습니다. 30분 동안 일이 없으면 스스로 꺼집니다(알림 영역 아이콘 메뉴에서 바꿀 수 있음).</p>
+       <p>글 뽑기(TXT)와 PDF 합치기·쪽 뽑기는 이 프로그램 없이도 됩니다. 이 프로그램이 필요한 것은 한글·워드 등을 PDF로 바꿀 때뿐입니다.</p>
+       <p>크롬이 '이 기기의 다른 앱과 서비스에 접근'을 물으면 <b>허용</b>을 눌러야 앱이 이 프로그램과 이야기할 수 있습니다(한 번만). 처음 켤 때 크롬이 프로그램을 열지 물으면 '항상 허용'에 표시해 두면 다음부터 묻지 않습니다.</p>`)),
     kv,
     SERVED_BY_ENGINE
-      ? h('p', { class: 'small muted', style: 'margin:10px 0 0' }, '이 앱은 엔진이 PC 안 주소로 띄운 것이라 인터넷 없이 동작합니다. 지울 때는 Windows 설정 > 앱에서 \'DRE 엔진\'을 지웁니다.')
+      ? h('p', { class: 'small muted', style: 'margin:10px 0 0' }, '이 앱은 PC에 설치한 DRE가 PC 안 주소로 띄운 것이라 인터넷 없이 동작합니다. 지울 때는 Windows 설정 > 앱에서 \'DRE\'를 지웁니다.')
       : h('div', {},
-        h('h4', { text: '이 PC에 엔진이 없다면' }),
-        h('p', { class: 'small', style: 'margin:4px 0' }, '아래에서 DreEngine.exe를 내려받아 한 번 실행하면 설치됩니다(관리자 권한 필요 없음). 설치하면 시작 메뉴 \'DRE\'로 인터넷 없이도 열 수 있습니다. 지울 때는 Windows 설정 > 앱에서 \'DRE 엔진\'을 지웁니다.'),
-        h('div.row', {}, h('a.btn', { href: 'engine/DreEngine.exe', download: 'DreEngine.exe', html: `${ico('save')}엔진 내려받기` }), h('span.muted.small', { text: 'Windows 전용' })),
+        h('h4', { text: '이 PC에 DRE가 설치돼 있지 않다면' }),
+        h('p', { class: 'small', style: 'margin:4px 0' }, '아래에서 DRE.exe를 내려받아 한 번 실행하면 설치됩니다(관리자 권한 필요 없음). 설치하면 시작 메뉴 \'DRE\'로 인터넷 없이도 열 수 있습니다. 지울 때는 Windows 설정 > 앱에서 \'DRE\'를 지웁니다.'),
+        h('div.row', {}, h('a.btn', { href: 'engine/DRE.exe', download: 'DRE.exe', html: `${ico('save')}DRE 내려받기` }), h('span.muted.small', { text: 'Windows 전용' })),
       ),
   );
-  const d = dialog('DRE 엔진', body, [
+  const d = dialog('DRE', body, [
     h('button.btn', { type: 'button', text: '다시 확인', onclick: () => checkEngine() }),
-    h('button.btn.primary', { type: 'button', html: `${ico('plug')}엔진 켜기`, onclick: () => launchEngine() }),
+    h('button.btn.primary', { type: 'button', html: `${ico('plug')}DRE 켜기`, onclick: () => launchEngine() }),
   ]);
   d.addEventListener('close', off);
 }
@@ -96,7 +96,7 @@ export function openSettings() {
       radio('theme', 'light', '밝게', settings.theme === 'light', () => { settings.theme = 'light'; saveSettings(); applyTheme(); }),
       radio('theme', 'dark', '어둡게', settings.theme === 'dark', () => { settings.theme = 'dark'; saveSettings(); applyTheme(); }),
     ),
-    h('h4', { text: 'DRE 엔진' }),
+    h('h4', { text: 'DRE' }),
     h('div.row', {}, h('span', { text: engineStatusText() }), h('button.btn.tiny', { type: 'button', text: '자세히', onclick: () => { d.close(); openEngineDialog(); } })),
     h('h4', { text: '정보' }),
     h('div.small.muted', {}, `DRE — Document Reformatting Engine · 판 ${BUILD} `, infoToggle(
@@ -112,8 +112,8 @@ export function engineChipSetup() {
   const label = chip.querySelector('.label');
   onEngine((e) => {
     chip.dataset.state = e.busy && e.status === 'on' ? 'busy' : e.status;
-    label.textContent = e.status === 'on' ? (e.busy ? '엔진 작업 중' : '엔진') : e.status === 'starting' ? '엔진 켜는 중' : e.status === 'checking' ? '엔진 확인 중' : '엔진 꺼짐';
-    chip.title = e.status === 'on' ? `DRE 엔진 켜짐 — ${Object.entries(e.apps || {}).filter(([, v]) => v).map(([k]) => APP_NAMES[k]).join('·')}` : 'DRE 엔진 — 눌러서 켜기';
+    label.textContent = e.status === 'on' ? (e.busy ? 'DRE 작업 중' : 'DRE 켜짐') : e.status === 'starting' ? 'DRE 켜는 중' : e.status === 'checking' ? 'DRE 확인 중' : 'DRE 꺼짐';
+    chip.title = e.status === 'on' ? `DRE 켜짐 — ${Object.entries(e.apps || {}).filter(([, v]) => v).map(([k]) => APP_NAMES[k]).join('·')}` : 'DRE 꺼짐 — 눌러서 켜기';
   });
   chip.addEventListener('click', () => {
     if (engine.status === 'off') { launchEngine().then((ok) => { if (!ok) openEngineDialog(); }); return; }
