@@ -18,6 +18,7 @@ function kindClass(kind) {
 }
 
 function rangeLabel(it) {
+  if (it.range && !it.range.length) return '고른 쪽 없음';
   if (it.range) return `${formatRange(it.range)}쪽`;
   if (it.pages) return `전체 ${it.pages}쪽`;
   return '전체';
@@ -34,7 +35,7 @@ function metaHtml(it) {
   else if (it.state === 'warn') html = `<span class="warnmsg">${esc(it.msg)}</span>`;
   else if (it.msg && (it.state === 'working' || it.state === 'queued' || it.state === 'done')) html = esc(it.msg);
   else if (it.needsPassword && !it.password) html += ` · <span class="warnmsg">암호 필요</span>`;
-  else if (it.probeError && it.probeError !== 'password') html += ` · <span class="errmsg">${esc(it.probeMsg || '열지 못함')}</span>`;
+  else if (it.probeError && it.probeError !== 'password' && it.probeError !== 'distribution') html += ` · <span class="errmsg">${esc(it.probeMsg || '열지 못함')}</span>`;
   else if (why) html += ` · <span class="warnmsg">${esc(why)}</span>`;
   return html;
 }

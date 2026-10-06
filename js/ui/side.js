@@ -257,7 +257,7 @@ function textSection(it) {
       draw();
     } catch (e) {
       if (e.code === 'cancelled' || textAbort !== ac) return;
-      if (e.code === 'password' || e.code === 'password_wrong') { updateItem(it, { needsPassword: true, password: null }); askPassword(it, () => load(), e.code === 'password_wrong'); return; }
+      if (it.kind === 'pdf' && (e.code === 'password' || e.code === 'password_wrong')) { updateItem(it, { needsPassword: true, password: null }); askPassword(it, () => load(), e.code === 'password_wrong'); return; }
       stat.textContent = '';
       warnBox.hidden = false;
       warnBox.textContent = e.message || '글을 뽑지 못했습니다';

@@ -10,11 +10,16 @@ import { OFFICE, IMAGES } from './core/detect.js';
 import { baseName, toast } from './util.js';
 
 let abort = null;
+let starting = false; // 엔진 켜기·폴더 권한을 기다리는 동안 두 번 눌리지 않게
 
 // 이 할 일에 넣을 수 있는가(못 하면 까닭)
 export function whyNot(it, mode) {
   if (it.kind === 'unknown') return '알 수 없는 형식입니다';
   if (it.probeError === 'broken') return it.probeMsg || '파일이 손상된 것 같습니다';
+  if (it.probeError === 'password' && it.kind !== 'pdf') return '암호가 걸린 문서입니다';
+  if (it.probeError === 'distribution' && mode === 'text') return null; // 배포용 한글: 엔진으로 PDF를 만든 뒤 뽑는다(produce.js)
+  if (it.probeError === 'drm') return '보안(DRM)이 걸린 문서입니다';
+  if (it.range && !it.range.length) return '고른 쪽이 없습니다';
   if (mode === 'pdf') {
     if (it.kind === 'pdf' && !it.range) return '이미 PDF(건너뜀)';
     return null;
@@ -49,10 +54,19 @@ function failMsg(e) {
 
 // 실행 버튼(사용자가 누른 순간 불린다 — 엔진 켜기·저장 폴더 권한은 이때만 물을 수 있다)
 export async function runAll() {
-  if (store.running) return;
+  if (store.running || starting) return;
   const mode = store.mode;
   const items = runnable(mode);
   if (!items.length) { toast('처리할 파일이 없습니다'); return; }
+  starting = true;
+  try {
+    await runInner(mode, items);
+  } finally {
+    starting = false;
+  }
+}
+
+async function runInner(mode, items) {
 
   // 엔진이 필요한데 꺼져 있으면 지금 켠다
   const wantEngine = items.some((it) => needsEngine(it) && (mode !== 'text' || !['hwp', 'hwpx', 'docx', 'doc'].includes(it.kind) || it.range));
@@ -112,7 +126,7 @@ export async function runAll() {
     setStatus(abort.signal.aborted ? '중지했습니다' : `끝 · 성공 ${ok}${bad ? ` · 실패 ${bad}` : ''} · ${secs}초`);
     if (!abort.signal.aborted) {
       const where = settings.save === 'download' ? '다운로드 폴더' : '';
-      if (ok) toast(`${ok}개 저장했습니다${where ? ' (' + where + ')' : ''}`);
+      if (ok && mode !== 'merge') toast(`${ok}개 저장했습니다${where ? ' (' + where + ')' : ''}`);
       for (const n of session.notes) toast(n);
     }
     abort = null;
@@ -154,6 +168,8 @@ async function textOne(it, session) {
   const text = render(doc, renderOptions(), it.range ? new Set(it.range) : null);
   const blob = textBlob(text, { bom: settings.bom });
   const saved = await saveOutput(session, it, `${baseName(it.name)}.txt`, blob);
+  // 많이 한꺼번에 뽑을 때는 보고 있지 않은 문서의 뽑은 글을 바로 놓아 메모리를 아낀다(다시 고르면 새로 뽑음)
+  if (store.items.length > 20 && store.selected !== it.id) updateItem(it, { textDoc: null, textKey: null });
   const warn = !text.trim() ? '뽑을 글이 없습니다' + (doc.warnings && doc.warnings[0] ? ` — ${doc.warnings[0]}` : '') : null;
   return { saved, blob, warn: warn ? `${warn} (저장: ${saved.name})` : null };
 }

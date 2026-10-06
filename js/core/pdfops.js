@@ -57,10 +57,12 @@ export async function buildPdf(pdfjs, loadPdfLib, parts, { outline = false, titl
   if (!parts.length) throw new PdfOpError('empty', '담을 문서가 없습니다');
   // 1) 하나씩 미리 열어 본다(망가진 파일이 섞이면 어느 것인지 알려 주려고)
   const counts = [];
+  const totals = [];
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
     try {
       const info = await inspectPdf(pdfjs, p.bytes, { password: p.password, opts });
+      totals.push(info.pages);
       counts.push(p.pages ? p.pages.filter((n) => n >= 1 && n <= info.pages).length : info.pages);
       if (p.pages && !counts[i]) throw new PdfOpError('range', `고른 쪽이 문서에 없습니다(전체 ${info.pages}쪽)`);
     } catch (e) {
@@ -75,10 +77,11 @@ export async function buildPdf(pdfjs, loadPdfLib, parts, { outline = false, titl
   let out;
   try {
     const base = await task.promise;
-    const infos = parts.map((p) => {
+    const infos = parts.map((p, i) => {
       const info = { document: p.bytes.slice() };
       if (p.password) info.password = p.password;
-      if (p.pages) info.includePages = toRanges(p.pages);
+      // 고른 쪽 중 실제로 있는 쪽만(한글 문서는 어림 쪽 수로 골랐을 수 있다)
+      if (p.pages) info.includePages = toRanges(p.pages.filter((n) => n >= 1 && n <= totals[i]));
       return info;
     });
     out = await base.extractPages(infos);

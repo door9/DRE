@@ -1,6 +1,6 @@
 // DRE 서비스워커 — 인터넷이 없어도 앱이 열리게 앱 파일을 보관한다.
 // 같은 주소(door9.github.io)의 다른 앱 캐시를 건드리지 않도록 dre- 로 시작하는 것만 정리한다.
-const VERSION = '274b6a8d49';
+const VERSION = 'c52718f5c6';
 const CACHE = `dre-shell-${VERSION}`;
 const RUNTIME = 'dre-runtime-1';
 
@@ -9,9 +9,9 @@ const SHELL = [
   'icons/icon-512.png', 'icons/icon-64.png', 'icons/icon-maskable-512.png', 'icons/icon.svg', 'js/engine.js',
   'js/intake.js', 'js/jobs.js', 'js/main.js', 'js/produce.js', 'js/run.js', 'js/save.js', 'js/settings.js',
   'js/store.js', 'js/thumbs.js', 'js/util.js', 'js/version.js', 'vendor/fflate.LICENSE', 'vendor/fflate.mjs',
-  'vendor/pdf-lib.mjs', 'js/core/align.js', 'js/core/cfb.js', 'js/core/detect.js', 'js/core/docx.js',
-  'js/core/hwp.js', 'js/core/hwpx.js', 'js/core/joiner.js', 'js/core/model.js', 'js/core/numfmt.js',
-  'js/core/pagetrack.js', 'js/core/pdfextract.js', 'js/core/pdflayout.js', 'js/core/pdfops.js',
+  'vendor/pdf-lib.mjs', 'js/core/align.js', 'js/core/cfb.js', 'js/core/detect.js', 'js/core/doc.js',
+  'js/core/docx.js', 'js/core/hwp.js', 'js/core/hwpx.js', 'js/core/joiner.js', 'js/core/model.js',
+  'js/core/numfmt.js', 'js/core/pagetrack.js', 'js/core/pdfextract.js', 'js/core/pdflayout.js', 'js/core/pdfops.js',
   'js/core/spacingdata.js', 'js/core/xml.js', 'js/ui/dialogs.js', 'js/ui/list.js', 'js/ui/side.js',
   'js/worker/task.js', 'vendor/pdfjs/LICENSE', 'vendor/pdfjs/pdf.min.mjs', 'vendor/pdfjs/pdf.worker.min.mjs',
   'vendor/pdfjs/cmaps/78-EUC-H.bcmap', 'vendor/pdfjs/cmaps/78-EUC-V.bcmap', 'vendor/pdfjs/cmaps/78-H.bcmap',

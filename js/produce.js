@@ -48,7 +48,7 @@ export async function ensurePdf(it, { signal, onState } = {}) {
 
 // 뽑은 글(문서 모델). range: 쪽 번호 배열 또는 null
 export async function ensureText(it, { range = null, signal, onProgress, onState } = {}) {
-  const direct = ['pdf', 'hwp', 'hwpx', 'docx', 'doc'].includes(it.kind);
+  const direct = ['pdf', 'hwp', 'hwpx', 'docx', 'doc'].includes(it.kind) && it.probeError !== 'distribution';
   if (IMAGES.has(it.kind)) throw fail('unsupported', '그림에서 글을 뽑으려면 문자 인식(OCR)이 필요합니다');
   const bigPdf = it.kind === 'pdf' && (it.pages || 0) > 80;
   // 무엇을 뽑을지 정한다(이미 있으면 그대로)

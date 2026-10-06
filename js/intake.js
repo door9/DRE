@@ -39,7 +39,8 @@ export function probe(it) {
     if (r.error) {
       patch.probeError = r.error;
       patch.probeMsg = r.message || '';
-      if (r.error === 'password') patch.needsPassword = true;
+      if (r.error === 'password' && patch.kind === 'pdf') patch.needsPassword = true;
+      else if (r.error === 'password') patch.probeMsg = '암호가 걸린 문서입니다(한글·워드에서 암호를 풀어 저장한 뒤 넣어 주세요)';
     } else {
       patch.pages = r.pages ?? null;
       patch.pageExact = !!r.pageExact;
