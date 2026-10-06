@@ -1,0 +1,206 @@
+// 실행 — 고른 할 일(PDF로 변환 / 텍스트 추출 / PDF 합치기)을 목록 차례대로 처리하고 저장한다
+import { store, updateItem, emit } from './store.js';
+import { settings, renderOptions } from './settings.js';
+import { ensurePdf, ensureText, needsEngine } from './produce.js';
+import { runJob, cancelAll } from './jobs.js';
+import { prepareSave, saveOutput, textBlob } from './save.js';
+import { render, formatRange } from './core/model.js';
+import { engineReady, launchEngine, engineCan } from './engine.js';
+import { OFFICE, IMAGES } from './core/detect.js';
+import { baseName, toast } from './util.js';
+
+let abort = null;
+
+// 이 할 일에 넣을 수 있는가(못 하면 까닭)
+export function whyNot(it, mode) {
+  if (it.kind === 'unknown') return '알 수 없는 형식입니다';
+  if (it.probeError === 'broken') return it.probeMsg || '파일이 손상된 것 같습니다';
+  if (mode === 'pdf') {
+    if (it.kind === 'pdf' && !it.range) return '이미 PDF(건너뜀)';
+    return null;
+  }
+  if (mode === 'text') {
+    if (IMAGES.has(it.kind)) return '그림은 글을 뽑을 수 없습니다';
+    return null;
+  }
+  return null;
+}
+
+export function runnable(mode) {
+  return store.items.filter((it) => !whyNot(it, mode));
+}
+
+export function mergeName() {
+  const v = (document.getElementById('mergeName') || {}).value;
+  if (v && v.trim()) return v.trim().replace(/\.pdf$/i, '');
+  const items = runnable('merge');
+  if (!items.length) return '합본';
+  return items.length > 1 ? `${baseName(items[0].name)} 외 ${items.length - 1}건` : baseName(items[0].name);
+}
+
+function setStatus(text) {
+  const el = document.getElementById('runStatus');
+  if (el) el.textContent = text || '';
+}
+
+function failMsg(e) {
+  return (e && e.message) || '실패했습니다';
+}
+
+// 실행 버튼(사용자가 누른 순간 불린다 — 엔진 켜기·저장 폴더 권한은 이때만 물을 수 있다)
+export async function runAll() {
+  if (store.running) return;
+  const mode = store.mode;
+  const items = runnable(mode);
+  if (!items.length) { toast('처리할 파일이 없습니다'); return; }
+
+  // 엔진이 필요한데 꺼져 있으면 지금 켠다
+  const wantEngine = items.some((it) => needsEngine(it) && (mode !== 'text' || !['hwp', 'hwpx', 'docx', 'doc'].includes(it.kind) || it.range));
+  let enginePromise = null;
+  if (wantEngine && !engineReady()) enginePromise = launchEngine();
+
+  let session;
+  try {
+    session = await prepareSave(settings.save, items);
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    toast(failMsg(e), { bad: true });
+    return;
+  }
+  if (enginePromise) {
+    setStatus('DRE 엔진을 켜는 중…');
+    if (!(await enginePromise)) {
+      setStatus('');
+      toast('DRE 엔진을 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.', { bad: true, ms: 6000 });
+      import('./ui/dialogs.js').then((m) => m.openEngineDialog());
+    }
+  }
+
+  store.running = true;
+  abort = new AbortController();
+  emit('running');
+  for (const it of store.items) updateItem(it, { state: items.includes(it) ? 'queued' : 'idle', msg: '', progress: 0 });
+  let ok = 0, bad = 0;
+  const t0 = Date.now();
+  try {
+    if (mode === 'merge') {
+      const r = await mergeAll(items, session);
+      ok = r ? 1 : 0;
+      bad = r ? 0 : 1;
+    } else {
+      for (let i = 0; i < items.length; i++) {
+        if (abort.signal.aborted) break;
+        const it = items[i];
+        setStatus(`${i + 1}/${items.length} ${mode === 'pdf' ? 'PDF로 바꾸는 중' : '글 뽑는 중'}…`);
+        updateItem(it, { state: 'working', progress: 0, msg: '' });
+        try {
+          const out = mode === 'pdf' ? await convertOne(it, session) : await textOne(it, session);
+          updateItem(it, { state: out.warn ? 'warn' : 'done', msg: out.warn || `저장: ${out.saved.name}`, progress: 1, output: out });
+          ok++;
+        } catch (e) {
+          if (e.code === 'cancelled' || abort.signal.aborted) { updateItem(it, { state: 'idle', msg: '' }); break; }
+          updateItem(it, { state: 'error', msg: failMsg(e) });
+          bad++;
+        }
+      }
+    }
+  } finally {
+    store.running = false;
+    for (const it of store.items) if (it.state === 'queued' || it.state === 'working') updateItem(it, { state: 'idle', msg: '' });
+    emit('running');
+    const secs = Math.round((Date.now() - t0) / 1000);
+    setStatus(abort.signal.aborted ? '중지했습니다' : `끝 · 성공 ${ok}${bad ? ` · 실패 ${bad}` : ''} · ${secs}초`);
+    if (!abort.signal.aborted) {
+      const where = settings.save === 'download' ? '다운로드 폴더' : '';
+      if (ok) toast(`${ok}개 저장했습니다${where ? ' (' + where + ')' : ''}`);
+      for (const n of session.notes) toast(n);
+    }
+    abort = null;
+  }
+}
+
+// 결과를 새 창에서 보기(PDF는 브라우저 PDF 보기, TXT는 글로)
+export function openBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
+}
+
+export function stopAll() {
+  if (abort) abort.abort();
+  cancelAll();
+}
+
+async function convertOne(it, session) {
+  const signal = abort.signal;
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '엔진 대기 중' : s === 'engine' ? (it.kind.startsWith('hwp') ? '한글로 PDF 만드는 중' : '프로그램으로 PDF 만드는 중') : '' });
+  let pdf = await ensurePdf(it, { signal, onState });
+  let name = `${baseName(it.name)}.pdf`;
+  if (it.range) {
+    updateItem(it, { msg: '쪽 뽑는 중' });
+    const job = runJob('build', { parts: [{ file: pdf, kind: 'pdf', pages: it.range, password: it.password, title: baseName(it.name) }], outline: false }, { onProgress: (v) => updateItem(it, { progress: v }) });
+    signal.addEventListener('abort', () => job.cancel(), { once: true });
+    pdf = (await job.promise).blob;
+    if (it.kind === 'pdf') name = `${baseName(it.name)} (${formatRange(it.range)}쪽).pdf`;
+  }
+  const saved = await saveOutput(session, it, name, pdf);
+  return { saved, blob: pdf };
+}
+
+async function textOne(it, session) {
+  const signal = abort.signal;
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '엔진 대기 중' : s === 'engine' ? '쪽 맞추려고 PDF 만드는 중' : '글 뽑는 중' });
+  const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v) => updateItem(it, { progress: v }) });
+  const text = render(doc, renderOptions(), it.range ? new Set(it.range) : null);
+  const blob = textBlob(text, { bom: settings.bom });
+  const saved = await saveOutput(session, it, `${baseName(it.name)}.txt`, blob);
+  const warn = !text.trim() ? '뽑을 글이 없습니다' + (doc.warnings && doc.warnings[0] ? ` — ${doc.warnings[0]}` : '') : null;
+  return { saved, blob, warn: warn ? `${warn} (저장: ${saved.name})` : null };
+}
+
+async function mergeAll(items, session) {
+  const signal = abort.signal;
+  const parts = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (signal.aborted) return null;
+    updateItem(it, { state: 'working', msg: OFFICE.has(it.kind) ? '' : '준비' });
+    setStatus(`${i + 1}/${items.length} 준비 중…`);
+    try {
+      let file = it.file, kind = it.kind;
+      if (OFFICE.has(it.kind)) {
+        file = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '엔진 대기 중' : 'PDF 만드는 중' }) });
+        kind = 'pdf';
+      } else if (!IMAGES.has(it.kind) && it.kind !== 'pdf') {
+        throw Object.assign(new Error('합칠 수 없는 형식입니다'), { code: 'unsupported' });
+      }
+      parts.push({ file, kind, pages: it.range, password: it.password, title: baseName(it.name) });
+      updateItem(it, { state: 'queued', msg: '준비됨' });
+    } catch (e) {
+      if (e.code === 'cancelled' || signal.aborted) return null;
+      updateItem(it, { state: 'error', msg: failMsg(e) });
+      toast(`'${it.name}'을(를) 준비하지 못해 합치지 않았습니다: ${failMsg(e)}`, { bad: true, ms: 7000 });
+      return null;
+    }
+  }
+  setStatus('합치는 중…');
+  for (const it of items) updateItem(it, { state: 'working', msg: '합치는 중' });
+  const name = mergeName();
+  const job = runJob('build', { parts, outline: settings.merge.outline, title: name }, { onProgress: (v) => { for (const it of items) updateItem(it, { progress: v }); } });
+  signal.addEventListener('abort', () => job.cancel(), { once: true });
+  let blob;
+  try {
+    blob = (await job.promise).blob;
+  } catch (e) {
+    if (e.code === 'cancelled' || signal.aborted) return null;
+    const bad = e.index != null ? items[e.index] : null;
+    if (bad) updateItem(bad, { state: 'error', msg: failMsg(e) });
+    for (const it of items) if (it !== bad) updateItem(it, { state: 'idle', msg: '' });
+    toast(`합치지 못했습니다${bad ? ` ('${bad.name}')` : ''}: ${failMsg(e)}`, { bad: true, ms: 7000 });
+    return null;
+  }
+  const saved = await saveOutput(session, items[0], `${name}.pdf`, blob);
+  for (const it of items) updateItem(it, { state: 'done', msg: '', progress: 1 });
+  toast(`합친 PDF를 저장했습니다: ${saved.name}`, { ms: 8000, action: { label: '열기', run: () => openBlob(blob) } });
+  return saved;
+}

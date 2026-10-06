@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DRE</title>
+<meta name="description" content="DRE(Document Reformatting Engine) — 한글·워드 문서를 PDF로, PDF·문서의 글을 TXT로, 여러 문서를 PDF 하나로">
+<meta name="theme-color" content="#2f54eb">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="64x64" href="icons/icon-64.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<!-- 선 아이콘 모음: <svg class="ico"><use href="#i-이름"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-file-plus" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r=".9"/><circle cx="15" cy="6" r=".9"/><circle cx="9" cy="12" r=".9"/><circle cx="15" cy="12" r=".9"/><circle cx="9" cy="18" r=".9"/><circle cx="15" cy="18" r=".9"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5"/><path d="M13 6h8M13 11h6M13 16h4"/></symbol>
+    <symbol id="i-pages" viewBox="0 0 24 24"><rect x="4" y="3" width="11" height="14" rx="1.5"/><path d="M9 21h9a2 2 0 0 0 2-2V8"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 6h14M5 10h14M5 14h9M5 18h11"/></symbol>
+    <symbol id="i-merge" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="9" rx="1.2"/><rect x="14" y="4" width="7" height="9" rx="1.2"/><path d="M6.5 13v2.5h11V13M12 15.5V21M9.5 18.5L12 21l2.5-2.5"/></symbol>
+    <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8.5 13.5h7M8.5 17h4.5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="brand" title="Document Reformatting Engine"><img src="icons/icon-64.png" alt="" width="22" height="22"><span>DRE</span></div>
+  <nav class="modes" role="tablist" aria-label="할 일">
+    <button role="tab" data-mode="pdf"><svg class="ico"><use href="#i-pdf"/></svg>PDF로 변환</button>
+    <button role="tab" data-mode="text"><svg class="ico"><use href="#i-text"/></svg>텍스트 추출</button>
+    <button role="tab" data-mode="merge"><svg class="ico"><use href="#i-merge"/></svg>PDF 합치기</button>
+  </nav>
+  <div class="grow"></div>
+  <button id="engineChip" class="chip engine" data-state="checking" title="DRE 엔진"><span class="dot"></span><span class="label">엔진</span></button>
+  <button id="btnSettings" class="icon-btn" title="설정"><svg class="ico"><use href="#i-gear"/></svg></button>
+</header>
+
+<main class="work">
+  <section class="pane-list" aria-label="파일 목록">
+    <div class="listbar">
+      <button id="btnAdd" class="btn"><svg class="ico"><use href="#i-file-plus"/></svg>파일 추가</button>
+      <button id="btnAddFolder" class="btn"><svg class="ico"><use href="#i-folder"/></svg>폴더 추가</button>
+      <span id="listCount" class="muted"></span>
+      <div class="grow"></div>
+      <div class="sortwrap merge-only">
+        <button id="btnSort" class="btn" aria-haspopup="menu"><svg class="ico"><use href="#i-sort"/></svg>정렬</button>
+      </div>
+      <button id="btnClear" class="btn quiet" disabled>비우기</button>
+    </div>
+    <ol id="fileList" class="files" aria-label="파일"></ol>
+    <div id="emptyState" class="empty">
+      <svg class="ico big"><use href="#i-file-plus"/></svg>
+      <p>문서를 여기에 끌어다 놓으세요</p>
+      <p class="muted small">한글(HWP·HWPX)·워드(DOC·DOCX)·PDF, 엑셀·파워포인트·그림도 됩니다</p>
+    </div>
+  </section>
+
+  <section class="pane-side" id="side" aria-label="자세히"></section>
+</main>
+
+<footer class="actionbar">
+  <label class="savewrap">저장
+    <select id="saveTarget">
+      <option value="download">다운로드 폴더</option>
+      <option value="folder">폴더 고르기…</option>
+      <option value="source">원본과 같은 폴더</option>
+    </select>
+  </label>
+  <span id="saveFolderName" class="muted small"></span>
+  <div class="grow"></div>
+  <span id="runStatus" class="muted" aria-live="polite"></span>
+  <button id="btnStop" class="btn" hidden><svg class="ico"><use href="#i-stop"/></svg>중지</button>
+  <button id="btnRun" class="btn primary" disabled>PDF로 변환</button>
+</footer>
+
+<div id="dropOverlay" class="drop-overlay" hidden><div>여기에 놓으세요</div></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<input id="filePicker" type="file" multiple hidden accept=".hwp,.hwpx,.hwt,.doc,.docx,.rtf,.odt,.pdf,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.bmp,.webp">
+<input id="folderPicker" type="file" webkitdirectory hidden>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
