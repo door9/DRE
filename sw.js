@@ -1,6 +1,6 @@
 // DRE 서비스워커 — 인터넷이 없어도 앱이 열리게 앱 파일을 보관한다.
 // 같은 주소(door9.github.io)의 다른 앱 캐시를 건드리지 않도록 dre- 로 시작하는 것만 정리한다.
-const VERSION = '8e2fc5529d';
+const VERSION = '7503e86cae';
 const CACHE = `dre-shell-${VERSION}`;
 const RUNTIME = 'dre-runtime-1';
 

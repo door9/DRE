@@ -43,8 +43,8 @@ async function parseOffice(kind, bytes, onProgress) {
   }
 }
 
-async function openPdf(bytes, password) {
-  const task = pdfjs.getDocument({ ...PDF_OPTS, data: bytes, password: password || undefined, verbosity: 0 });
+async function openPdf(bytes, password, extra = {}) {
+  const task = pdfjs.getDocument({ ...PDF_OPTS, ...extra, data: bytes, password: password || undefined, verbosity: 0 });
   try {
     return { task, doc: await task.promise };
   } catch (e) {
@@ -86,7 +86,8 @@ const handlers = {
     const isCancelled = () => cancelled.has(id);
     const onProgress = (v) => post({ id, type: 'progress', value: v });
     if (kind === 'pdf') {
-      const { task, doc } = await openPdf(bytes, password);
+      // 글꼴 진짜 이름을 알아야 글자표가 잘못 적힌 글꼴(신문 조판 글꼴 등)을 바로잡을 수 있다
+      const { task, doc } = await openPdf(bytes, password, { fontExtraProperties: true });
       try {
         return await extractPdfDoc(pdfjs, doc, { pages: pages ? new Set(pages) : null, onProgress, isCancelled });
       } finally {

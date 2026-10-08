@@ -23,7 +23,7 @@ export async function extractPdfDoc(pdfjs, doc, { pages = null, onProgress, isCa
       if (hasText) {
         try { ops = await page.getOperatorList(); } catch { ops = null; }
       }
-      const data = pageFromPdfjs(tc, ops, viewport, pdfjs.OPS);
+      const data = pageFromPdfjs(tc, ops, viewport, pdfjs.OPS, fontNamesOf(page, tc, ops));
       const a = analyzePage(data);
       a.spaces = data.spaces;
       analyzed.push(a);
@@ -39,6 +39,20 @@ export async function extractPdfDoc(pdfjs, doc, { pages = null, onProgress, isCa
   if (wanted && textPages === 0) out.warnings.push('글자가 없는 PDF입니다(스캔한 그림으로 된 문서일 수 있습니다). 글자를 뽑으려면 문자 인식(OCR)이 필요합니다.');
   else if (wanted && textPages < wanted) out.warnings.push(`${wanted - textPages}쪽은 글자 없이 그림만 있습니다.`);
   if (onProgress) onProgress(1);
+  return out;
+}
+
+// 글꼴 진짜 이름(문서를 열 때 fontExtraProperties: true 여야 알 수 있다) — 글꼴별 글자 바로잡기에 쓴다
+function fontNamesOf(page, tc, ops) {
+  const out = {};
+  if (!ops) return out;
+  for (const k of Object.keys(tc.styles || {})) {
+    try {
+      if (!page.commonObjs.has(k)) continue;
+      const f = page.commonObjs.get(k);
+      if (f && f.name) out[k] = String(f.name);
+    } catch { /* 없으면 그만 */ }
+  }
   return out;
 }
 

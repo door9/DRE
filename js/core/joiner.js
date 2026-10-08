@@ -15,16 +15,30 @@ const LIST_START = new RegExp(
   '^(?:' + [
     `[${BULLET_CHARS}]`,
     '[-–—·∙*+>ㅇ]\\s', // 하이픈·가운뎃점 등은 뒤에 빈칸이 있을 때만
-    '(?:\\d{1,2}|[가-하]|[A-Za-z]|[ivxIVX]{1,4}|[ⅰ-ⅹⅠ-Ⅻ])[.)]\\s',
-    '(?:\\d{1,2}|[가-하])\\)',
+    '(?:\\d{1,2}|[A-Za-z]|[ivxIVX]{1,4}|[ⅰ-ⅹⅠ-Ⅻ])[.)]\\s',
+    '(?:\\d{1,2}|[가나다라마바사아자차카타파하])\\)',
     '\\((?:\\d{1,2}|[가-하]|[a-zA-Z])\\)',
     '[①-⑳㉠-㉭㉮-㉻❶-❿➀-➓⓵-⓾ⓐ-ⓩⒶ-Ⓩ]',
     '제\\s?\\d+\\s?(?:조|항|호|장|절|편)(?:의\\d+)?(?:\\(|\\s|$)',
     '[<【〈《\\[]\\s?(?:참고|붙임|별첨|첨부|예시|사례|표|그림)',
   ].join('|') + ')',
 );
-export function isListStart(s) {
-  return LIST_START.test(s.replace(/^[\s\u3000]+/, ''));
+// 한글 차례 글자 '가. 나. 다.' — 신문에서는 '…했' + '다. 다음 문장'처럼 문장 끝 '다.'가 줄 첫머리에 자주 온다.
+// enums(문서의 줄 첫머리에 나온 차례 글자 모음)를 주면 앞 차례 글자(다 → 나)가 문서에 있을 때만 목록으로 본다.
+const HANGUL_ENUM = /^([가나다라마바사아자차카타파하])[.)]\s/;
+const ENUM_ORDER = '가나다라마바사아자차카타파하';
+export function hangulEnum(s) {
+  const m = HANGUL_ENUM.exec(s.replace(/^[\s\u3000]+/, ''));
+  return m ? m[1] : null;
+}
+export function isListStart(s, enums) {
+  const t = s.replace(/^[\s\u3000]+/, '');
+  if (LIST_START.test(t)) return true;
+  const e = hangulEnum(t);
+  if (!e) return false;
+  if (!enums) return true;
+  const i = ENUM_ORDER.indexOf(e);
+  return i === 0 ? enums.has('나') : enums.has(ENUM_ORDER[i - 1]);
 }
 
 const HANGUL = /[가-힣]/;
@@ -112,15 +126,39 @@ export class WordStats {
     }
   }
   has(w) { return this.count.get(w) || 0; }
+  // 조사가 붙은 꼴로 쓰인 횟수(기사를·기사의 → '기사'): 그 말이 한 낱말이라는 근거
+  stemCount(w) {
+    if (!this._stems || this._stemsAt !== this.count.size) {
+      this._stems = new Map();
+      this._stemsAt = this.count.size;
+      for (const [tok, n] of this.count) {
+        for (const suf of STEM_TAILS) {
+          if (tok.length - suf.length >= 2 && tok.endsWith(suf)) {
+            const st = tok.slice(0, -suf.length);
+            this._stems.set(st, (this._stems.get(st) || 0) + n);
+            break;
+          }
+        }
+      }
+    }
+    return this._stems.get(w) || 0;
+  }
   starts(w) { return (this.count.get(w) || 0) + (this.prefix.get(w) || 0); }
 }
+
+const STEM_TAILS = ['에서', '에게', '으로', '까지', '부터', '처럼', '보다', '만큼', '에는', '에도', '와의', '과의', '이라', '이다', '은', '는', '이', '가', '을', '를', '의', '에', '와', '과', '도', '로', '만'];
+// 홀로 선 한 글자 토막이 조사·어미 꼴이면(…근로자 과 | 반) 낱말일 수 없다 → 잘린 낱말
+const LONE_TAIL = /^[과와을를는에로의고며]$/;
 
 // 점수: 양수면 붙이고(N) 음수면 띄운다(S). hint: { wrap: 'word'|'char'|null, space: 끝에 빈칸 흔적 }
 export function joinScore(a, b, stats, hint = {}) {
   const A0 = a.replace(/[\s\u3000]+$/, '');
   const B0 = b.replace(/^[\s\u3000]+/, '');
   if (!A0 || !B0) return { code: 'S', score: -9 };
-  if (isListStart(B0)) return { code: 'H', score: 0 };
+  if (isListStart(B0, hint.enums)) return { code: 'H', score: 0 };
+  // 범위 물결(28~ | 30일), 항목 표(△ | MK 사내스쿨)는 붙인다
+  if (/[~∼〜]$/.test(A0) && /^[0-9]/.test(B0)) return { code: 'N', score: 6 };
+  if (/[△▲▷▶○●□■◇◆]$/.test(A0)) return { code: 'N', score: 6 };
   if (hint.space) return { code: 'S', score: -9 };
   const x = A0[A0.length - 1];
   const y = B0[0];
@@ -135,7 +173,7 @@ export function joinScore(a, b, stats, hint = {}) {
   if (CLOSE_START.test(B0) && !/^[·]\s/.test(B0)) return { code: 'N', score: 9 };
   if (OPEN_END.test(A0)) return { code: 'N', score: 9 };
   // 가운뎃점으로 이은 낱말: 금융위원회· | 금융감독원
-  if (/[·⋅․ㆍ・]$/.test(A0) && HANGUL.test(y)) return { code: 'N', score: 6 };
+  if (/[·⋅․ㆍ・]$/.test(A0) && /[가-힣A-Za-z0-9]/.test(y)) return { code: 'N', score: 6 };
   if ((HAN.test(x) || KANA.test(x)) && (HAN.test(y) || KANA.test(y))) return { code: 'N', score: 9 };
   // 닫는 따옴표·괄호 뒤 조사·인용 어미는 붙인다: …다.”라며, (주)가
   if (/[”’」』)\]"']$/.test(A0) && QUOTE_TAIL.test(B0)) return { code: 'N', score: 6 };
@@ -174,11 +212,15 @@ export function joinScore(a, b, stats, hint = {}) {
     const aPrefix = stats.prefix.get(Ak) || 0;           // 더 긴 낱말의 앞부분으로 쓰인 적 있나
     const bWord = stats.has(Bk) + (stats.prefix.get(Bk.slice(0, 2)) || 0); // 뒤 토막이 낱말 첫머리로 쓰인 적 있나
     const joinStart = Ak.length + 1 <= 8 ? stats.prefix.get(Ak + Bk[0]) || 0 : 0; // '앞 토막+뒤 첫 글자'로 시작하는 낱말
+    const aStem = Ak.length >= 2 ? stats.stemCount(Ak) : 0;  // 앞 토막이 조사 붙은 꼴로 쓰인 적 있나(그 자체로 낱말)
     if (joined) score += 3 + Math.min(3, joined);
-    else if (joinStart && Ak.length >= 2) score += 1.2 + Math.min(1, joinStart / 3);
-    if (!aWord && aPrefix && Ak.length >= 2) score += 1.2;   // 앞 토막은 늘 더 긴 낱말의 일부였다 → 잘린 낱말
+    else if (joinStart && (Ak.length >= 2 || (joinStart >= 2 && !bWord))) score += 1.2 + Math.min(1, joinStart / 3);
+    if (!aWord && !aStem && aPrefix && Ak.length >= 2) score += 1.2;   // 앞 토막은 늘 더 긴 낱말의 일부였다 → 잘린 낱말
     if (aWord && bWord && !joined && !joinStart) score -= 2 + Math.min(1.5, Math.min(aWord, bWord) / 3);
-    else if (aWord && !joined && !joinStart) score -= 1;
+    else if ((aWord || aStem >= 2) && !joined && !joinStart) score -= 1;
+    // 앞 토막이 '알려진 낱말 + 조사'(유튜브와·조직이)면 낱말이 끝난 것
+    const pStem = Ak.length >= 3 && /[은는이가을를의에와과도로]$/.test(Ak) ? Ak.slice(0, -1) : null;
+    if (pStem && (stats.has(pStem) || stats.stemCount(pStem) >= 2) && !joined && !joinStart) score -= 1.5;
     else if (bWord && !joined && !joinStart && !dep && Ak.length >= 2) score -= 0.6;
   }
   if (dep) score += 3;
@@ -187,7 +229,9 @@ export function joinScore(a, b, stats, hint = {}) {
   const ps = spaceProb(Ak, Bk);
   if (ps != null) score += -logit(ps) * SPACING_WEIGHT;
   if (WORD_END.test(Ak) && !dep) score -= 0.8;
-  if (Ak.length === 1 && !/[은는이가을를의에와과도로만및등]/.test(Ak)) score += 1; // 한 글자만 남은 앞 줄 끝은 잘린 낱말일 때가 많다
+  // 한 글자만 남은 앞 줄 끝은 잘린 낱말일 때가 많다(문서에서 홀로 자주 쓰인 한 글자 낱말 '더·또'는 빼고)
+  if (Ak.length === 1 && core(lastTok) === Ak && LONE_TAIL.test(Ak)) score += 2;
+  else if (Ak.length === 1 && !/[은는이가을를의에와과도로만및등]/.test(Ak) && !(stats && stats.has(Ak) >= 2)) score += 1;
   const ling = score; // 말(낱말·조사) 근거만의 점수 — 문서 경향을 잴 때 쓴다
   if (hint.wrap === 'word') score -= 3;
   return { code: score > 0 ? 'N' : 'S', score, ling, korean: true };
