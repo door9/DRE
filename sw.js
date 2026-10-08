@@ -1,6 +1,6 @@
 // DRE 서비스워커 — 인터넷이 없어도 앱이 열리게 앱 파일을 보관한다.
 // 같은 주소(door9.github.io)의 다른 앱 캐시를 건드리지 않도록 dre- 로 시작하는 것만 정리한다.
-const VERSION = '16a20970b3';
+const VERSION = '611ca2b83d';
 const CACHE = `dre-shell-${VERSION}`;
 const RUNTIME = 'dre-runtime-1';
 
@@ -115,12 +115,32 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
+  const upgraded = (async () => {
     const keys = await caches.keys();
+    const old = keys.filter((k) => k.startsWith('dre-shell-') && k !== CACHE);
     await Promise.all(keys.filter((k) => k.startsWith('dre-') && k !== CACHE && k !== RUNTIME).map((k) => caches.delete(k)));
     await self.clients.claim();
-  })());
+    return old.length > 0;
+  })();
+  event.waitUntil(upgraded);
+  // 창 다시 열기는 자리 잡기(activate)가 끝난 뒤에 한다 — 자리 잡는 중에 다시 열면 그 창의 요청이 자리 잡기를 기다려 서로 멈춘다
+  upgraded.then((was) => { if (was) setTimeout(refreshWindows, 0); }).catch(() => {});
 });
+
+// 새 판으로 바뀌었으면 열려 있는 창을 새 판으로 다시 연다 — 옛 창이 옛 코드로 계속 일하지 않게.
+// 창에 먼저 묻고(작업 중이면 끝난 뒤 스스로 바꾼다), 대답이 없으면(대답할 줄 모르는 옛 판 화면) 바로 다시 연다
+async function refreshWindows() {
+  const wins = await self.clients.matchAll({ type: 'window' });
+  await Promise.all(wins.map(async (c) => {
+    const answer = await new Promise((resolve) => {
+      const ch = new MessageChannel();
+      const timer = setTimeout(() => resolve(null), 2000);
+      ch.port1.onmessage = (e) => { clearTimeout(timer); resolve(e.data || 'ok'); };
+      try { c.postMessage({ type: 'dre-new-build', build: VERSION }, [ch.port2]); } catch { clearTimeout(timer); resolve(null); }
+    });
+    if (!answer) { try { await c.navigate(c.url); } catch { /* 못 하면 다음에 열 때 */ } }
+  }));
+}
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;

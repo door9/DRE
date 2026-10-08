@@ -8,7 +8,8 @@ import { setupDrop, pickFiles, pickFolder } from './intake.js';
 import { runAll, stopAll, runnable } from './run.js';
 import { watchEngine } from './engine.js';
 import { loadSavedFolder, savedFolderName, chooseFolder, canPickFolder } from './save.js';
-import { toast } from './util.js';
+import { toast, local } from './util.js';
+import { BUILD } from './version.js';
 
 const RUN_LABEL = { pdf: 'PDF로 변환', text: '텍스트 추출', merge: 'PDF로 합치기' };
 
@@ -88,17 +89,29 @@ async function main() {
 
   // 오프라인용 보관(서비스워커): PC 안 주소(DRE.exe가 내보냄)·공개 주소 모두. 개발 서버(8410)만 뺀다
   if ('serviceWorker' in navigator && window.isSecureContext && location.port !== '8410') {
-    navigator.serviceWorker.register('sw.js').then((reg) => {
-      reg.addEventListener('updatefound', () => {
-        const nw = reg.installing;
-        nw && nw.addEventListener('statechange', () => {
-          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-            toast('새 판이 준비됐습니다', { ms: 15000, action: { label: '새로 고침', run: () => location.reload() } });
-          }
-        });
-      });
-    }).catch(() => {});
+    // 새 판이 자리 잡으면 서비스워커가 묻는다: 작업 중이 아니면 바로 새 판으로 다시 열고, 작업 중이면 끝난 뒤에
+    let pending = false;
+    const reloadNow = () => { pending = false; location.reload(); };
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (!e.data || e.data.type !== 'dre-new-build') return;
+      const port = e.ports && e.ports[0];
+      if (store.running) {
+        if (port) port.postMessage('busy');
+        pending = true;
+        toast('새 판이 준비됐습니다. 지금 작업이 끝나면 새 판으로 바뀝니다', { ms: 8000 });
+        return;
+      }
+      if (port) port.postMessage('reload');
+      reloadNow();
+    });
+    on('running', () => { if (pending && !store.running) setTimeout(reloadNow, 1500); });
+    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => {});
   }
+  // 판이 바뀐 뒤 처음 열렸으면 알린다(어느 판인지 확인할 수 있게)
+  document.documentElement.dataset.build = BUILD;
+  const lastBuild = local.get('build', null);
+  if (lastBuild && lastBuild !== BUILD) toast(`새 판으로 바뀌었습니다 (판 ${BUILD})`, { ms: 6000 });
+  local.set('build', BUILD);
 }
 
 main();
