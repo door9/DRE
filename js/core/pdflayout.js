@@ -208,43 +208,52 @@ function parsePath(args, OPS) {
 //   여는지 닫는지는 모양으로(무게 중심이 아래면 여는 따옴표), 애매하면 어느 낱말에 붙어 있는지로.
 function addVectorGlyphs(glyphs, items, spaces) {
   const added = [];
+  // 따옴표·가운뎃점을 도형으로 그리는 조판은 쪽 글에 그 글자가 아예 없다. 글에 이미 있으면 그 쪽은 글자로 쓴 문서다
+  const hasQuote = items.some((it) => /[“”‘’"']/.test(it.s));
+  const hasDot = items.some((it) => /[·ㆍ‧∙・]/.test(it.s));
+  if (hasQuote && hasDot) return;
   for (const g of glyphs) {
     const gx = (g.x0 + g.x1) / 2, gy = (g.y0 + g.y1) / 2;
     let r = null, best = Infinity, inside = null;
     for (const it of items) {
       if (gy < it.y - it.size * 0.95 || gy > it.y + it.size * 0.05) continue;
-      const d = gx < it.x0 ? it.x0 - g.x1 : gx > it.x1 ? g.x0 - it.x1 : -1;
+      // 도형 가운데가 글 조각 밖이면 거리(살짝 겹쳐도 0), 안이면 -1
+      const d = gx < it.x0 ? Math.max(0, it.x0 - g.x1) : gx > it.x1 ? Math.max(0, g.x0 - it.x1) : -1;
       if (d < 0) { inside = it; break; }
       if (d < it.size * 1.2 && d < best) { best = d; r = it; }
     }
-    // 글 조각 안에 놓인 도형: 그 자리가 빈칸이면(pdf.js 가 도형 자리를 빈칸으로 채움) 조각을 둘로 나눈다.
-    // 빈칸이 아닌 자리(글자 위에 겹친 밑줄·강조 표시 등)는 건드리지 않는다
-    if (inside) {
-      const parts = splitAtSpace(inside, gx, g);
-      if (!parts) continue;
-      items.splice(items.indexOf(inside), 1, parts[0], parts[1]);
-      r = parts[0];
-    }
-    if (!r) continue;
-    const s = r.size, w = (g.x1 - g.x0) / s, h = (g.y1 - g.y0) / s;
-    const above = (r.y - g.y1) / s;   // 기준선에서 도형 아래끝까지(위로 +)
-    const top = (r.y - g.y0) / s;     // 기준선에서 도형 위끝까지
-    const mid = (r.y - gy) / s;
+    const ref = inside || r;
+    if (!ref) continue;
+    const s = ref.size, w = (g.x1 - g.x0) / s, h = (g.y1 - g.y0) / s;
+    const above = (ref.y - g.y1) / s;   // 기준선에서 도형 아래끝까지(위로 +)
+    const top = (ref.y - g.y0) / s;     // 기준선에서 도형 위끝까지
+    const mid = (ref.y - gy) / s;
     let ch = null;
     if (h >= 0.12 && h <= 0.45 && above >= 0.3 && top <= 1.05) {
       if (g.n === 2 && w >= 0.15 && w <= 0.6) ch = 'dq';
       else if (g.n === 1 && w >= 0.04 && w <= 0.25) ch = 'sq';
     }
     if (!ch && g.n === 1 && w >= 0.06 && w <= 0.3 && h >= 0.06 && h <= 0.3 && w / h > 0.5 && w / h < 2 && mid >= 0.15 && mid <= 0.6) ch = '\u00B7';
-    if (!ch) continue;
-    if (ch === 'dq' || ch === 'sq') {
-      // 같은 줄에서 왼쪽·오른쪽으로 가장 가까운 글
-      let gl = Infinity, gr = Infinity;
-      for (const it of items) {
-        if (Math.abs(it.y - r.y) > s * 0.3) continue;
-        if (it.x1 <= g.x0 + 0.5) gl = Math.min(gl, g.x0 - it.x1);
-        else if (it.x0 >= g.x1 - 0.5) gr = Math.min(gr, it.x0 - g.x1);
-      }
+    if (!ch || (ch === '\u00B7' ? hasDot : hasQuote)) continue;
+    // 글 조각 안에 놓인 문장부호 도형: 그 자리가 빈칸이면(pdf.js 가 도형 자리를 빈칸으로 채움) 조각을 둘로 나눈다.
+    // 빈칸이 아닌 자리(글자 위에 겹친 밑줄·강조 표시 등)는 건드리지 않는다
+    let parts = null;
+    if (inside) {
+      parts = splitAtSpace(inside, gx, g);
+      if (!parts) continue;
+    }
+    // 같은 줄에서 왼쪽·오른쪽으로 가장 가까운 글
+    let gl = Infinity, gr = Infinity;
+    for (const it of parts ? [parts[0], parts[1], ...items] : items) {
+      if (it === inside || Math.abs(it.y - ref.y) > s * 0.3) continue;
+      if (it.x1 <= g.x0 + 0.5) gl = Math.min(gl, g.x0 - it.x1);
+      else if (it.x0 >= g.x1 - 0.5) gr = Math.min(gr, it.x0 - g.x1);
+    }
+    // 진짜 글에 붙어 있어야 문장부호다(그래프 범례 네모·전화 그림 같은 장식은 아니다):
+    // 가운뎃점은 양쪽 글에, 여는 따옴표는 뒤 글에, 닫는 따옴표는 앞 글에 바짝 붙는다
+    if (ch === '\u00B7') {
+      if (gl > s * 0.4 || gr > s * 0.4) continue;
+    } else {
       // 모양이 먼저: 여는 따옴표(6 꼴)는 무게가 아래, 닫는 따옴표(9 꼴)는 위(매일경제 지면 실측 0.56·0.59 대 0.47·0.44). 애매하면 붙은 쪽
       const cr = (g.cy - g.y0) / Math.max(0.01, g.y1 - g.y0);
       let open;
@@ -252,9 +261,11 @@ function addVectorGlyphs(glyphs, items, spaces) {
       else if (cr < 0.48) open = false;
       else if (Math.abs(gl - gr) > s * 0.12) open = gr < gl;
       else open = true;
+      if (open ? gr > s * 0.35 : gl > s * 0.35) continue;
       ch = ch === 'dq' ? (open ? '\u201C' : '\u201D') : (open ? '\u2018' : '\u2019');
     }
-    added.push({ s: ch, x0: g.x0, x1: g.x1, y: r.y, size: s, font: '', vec: true });
+    if (parts) items.splice(items.indexOf(inside), 1, parts[0], parts[1]);
+    added.push({ s: ch, x0: g.x0, x1: g.x1, y: ref.y, size: s, font: '', vec: true });
   }
   if (!added.length) return;
   items.push(...added);
@@ -290,8 +301,10 @@ function splitAtSpace(it, x, g) {
   if (bi < 0 || bd > it.size * 0.7) return null;
   const left = chars.slice(0, bi).join(''), right = chars.slice(bi + 1).join('');
   if (!left.trim() || !right.trim()) return null;
-  // 어림한 자리가 도형과 겹치지 않게(줄 안 순서가 바뀌지 않도록)
-  return [{ ...it, s: left, x1: Math.min(bx0, g.x0 - 0.01) }, { ...it, s: right, x0: Math.max(bx1, g.x1 + 0.01) }];
+  // 어림한 자리가 도형과 겹치지 않게(줄 안 순서가 바뀌지 않도록). 어림이 조각 밖으로 나가면 나누지 않는다(글이 사라지지 않게)
+  const lx1 = Math.min(bx0, g.x0 - 0.01), rx0 = Math.max(bx1, g.x1 + 0.01);
+  if (lx1 <= it.x0 + it.size * 0.3 || rx0 >= it.x1 - it.size * 0.3) return null;
+  return [{ ...it, s: left, x1: lx1 }, { ...it, s: right, x0: rx0 }];
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -507,10 +520,11 @@ function fragText(f, spaces) {
       if (/[·‧․⋅ㆍ・]/.test(a) || /[·‧․⋅ㆍ・]/.test(b)) th = 0.6;
       else if (/[(\[「『“‘]/.test(a)) th = 0.5;
       else if (prev.vec || r.vec || prev.fixed || r.fixed) {
-        // 되살리거나 바로잡은 문장부호(신문 조판): 글자 폭이 아니라 잉크 폭이라 틈이 실제와 다르다
-        if (/[“‘「『〈《]/.test(b)) th = 0.1;                       // 여는 따옴표 앞 빈칸은 좁아도 빈칸
-        else if (/[”’」』]/.test(b)) th = 0.5;                       // 닫는 따옴표는 앞 글자에 붙는다
-        else if (/[”’」』]/.test(a) && /[가-힣]/.test(b)) th = 0.4;  // 그 뒤 조사도 붙는다(‘러스트벨트화’도)
+        // 되살리거나 바로잡은 문장부호(신문 조판). 도형으로 되살린 것(vec)은 글자 폭이 아니라 잉크 폭이라 틈이 실제보다 넓다
+        const vec = prev.vec || r.vec;
+        if (/[“‘「『〈《]/.test(b)) th = 0.1;                              // 여는 따옴표 앞 빈칸은 좁아도 빈칸
+        else if (vec && /[”’」』]/.test(b)) th = 0.5;                       // 닫는 따옴표는 앞 글자에 붙는다
+        else if (vec && /[”’」』]/.test(a) && /[가-힣]/.test(b)) th = 0.4;  // 그 뒤 조사도 붙는다(‘러스트벨트화’도)
       }
       const needSpace = !/\s$/.test(s) && !/^\s/.test(t) && (hint || gap > sz * th);
       if (needSpace) { s += ' '; gaps.push(gap / r.size); }
@@ -565,18 +579,40 @@ function gapsOf(els, lo, hi, minGap) {
 }
 
 // 세로 여백으로 나눠도 되는가(표처럼 줄이 나란한 곳은 나누지 않는다)
-function columnSplitOk(left, right, size) {
+function columnSplitOk(left, right, size, ctx = {}, gap = null) {
   const lb = bbox(left), rb = bbox(right);
   if (lb.x1 - lb.x0 < size * 5 || rb.x1 - rb.x0 < size * 5) return false;
   const lt = left.filter((e) => !e.table), rt = right.filter((e) => !e.table);
   if (lt.length < 2 || rt.length < 2) return lt.length + rt.length > 0 && (lt.length >= 3 || rt.length >= 3) && (left.some((e) => e.table) || right.some((e) => e.table));
-  // 양쪽 모두 긴 글줄(글자 8개 폭 이상)이면 단이다 — 신문처럼 단끼리 줄 높이가 같아도 표로 보지 않는다
+  // 양쪽 모두 긴 글줄(글자 8개 폭 이상)이고, 어느 한쪽에 오른쪽 끝을 맞춘(양쪽 맞춤) 본문 줄이 촘촘히(줄 간격 글자 1.75배 이하) 5줄 넘게
+  // 이어지면 단이다 — 신문처럼 단끼리 줄 높이가 같아도 표로 보지 않는다.
+  // (항목|날짜 표는 오른쪽 끝에 닿는 줄이 몇 개뿐이고 칸 여백 때문에 줄 간격이 넓다. 한쪽에 여러 단이 함께 있어도 그쪽 맨 오른쪽 단의 줄로 판단)
   const wide = (arr) => median(arr.map((e) => e.x1 - e.x0)) >= size * 8;
-  if (lt.length >= 3 && rt.length >= 3 && wide(lt) && wide(rt)) return true;
+  const colLike = (arr, b) => {
+    const f = arr.filter((e) => b.x1 - e.x1 < size);
+    if (f.length < 5) return false;
+    const ys = [...new Set(f.map((e) => Math.round(e.y)))].sort((p, q) => p - q);
+    const d = [];
+    for (let i = 1; i < ys.length; i++) if (ys[i] - ys[i - 1] > size * 0.3) d.push(ys[i] - ys[i - 1]);
+    return d.length >= 3 && median(d) <= size * 1.75;
+  };
+  // 단 사이를 가로지르는 가로줄이 여럿이면 줄마다 칸을 나눈 표다(세로줄 없는 표) — 단으로 보지 않는다
+  // (칸마다 따로 그린 줄은 틈 양쪽에서 같은 높이로 틈에 닿는다)
+  let rows = 0;
+  if (gap && ctx.hRules) {
+    const y0 = Math.min(lb.y0, rb.y0), y1 = Math.max(lb.y1, rb.y1);
+    const hs = ctx.hRules.filter((r) => r.y > y0 && r.y < y1);
+    const leftTouch = hs.filter((r) => r.b >= gap[0] - 3 && r.a < gap[0] - size * 2);
+    const rightTouch = hs.filter((r) => r.a <= gap[1] + 3 && r.b > gap[1] + size * 2);
+    rows = leftTouch.filter((l) => l.b > gap[1] + 1 || rightTouch.some((r) => Math.abs(r.y - l.y) < 2)).length;
+  }
+  if (rows < 2 && lt.length >= 3 && rt.length >= 3 && wide(lt) && wide(rt) && (colLike(lt, lb) || colLike(rt, rb))) return true;
   // 나란한 줄(같은 높이)이 많고 조각들이 짧으면 표 → 나누지 않음
   let aligned = 0;
   for (const a of lt) if (rt.some((b) => Math.abs(a.y - b.y) < size * 0.3)) aligned++;
   const alignRatio = aligned / Math.min(lt.length, rt.length);
+  // 몇 줄 안 되는 띠에서 왼쪽·오른쪽 줄이 한 줄씩 정확히 짝을 이루면 표의 행이다(항목|날짜) — 가르지 않는다
+  if (alignRatio >= 0.99 && lt.length === rt.length && lt.length <= 3) return false;
   const fillL = median(lt.map((e) => (e.x1 - e.x0) / Math.max(1, lb.x1 - lb.x0)));
   const fillR = median(rt.map((e) => (e.x1 - e.x0) / Math.max(1, rb.x1 - rb.x0)));
   if (alignRatio > 0.6 && (fillL < 0.7 || fillR < 0.7)) return false;
@@ -585,7 +621,7 @@ function columnSplitOk(left, right, size) {
   return true;
 }
 
-function xyCut(els, colBox, out, size, depth = 0) {
+function xyCut(els, colBox, out, size, depth = 0, ctx = {}) {
   if (!els.length) return;
   if (els.length === 1 || depth > 60) { out.push({ els, colBox }); return; }
   const box = bbox(els);
@@ -597,10 +633,10 @@ function xyCut(els, colBox, out, size, depth = 0) {
     const left = els.filter((e) => e.x1 <= a + 0.5);
     const right = els.filter((e) => e.x0 >= b - 0.5);
     if (left.length + right.length !== els.length) continue;
-    if (!columnSplitOk(left, right, size)) continue;
+    if (!columnSplitOk(left, right, size, ctx, [a, b])) continue;
     const L = [], R = [];
-    xyCut(left, bbox(left), L, size, depth + 1);
-    xyCut(right, bbox(right), R, size, depth + 1);
+    xyCut(left, bbox(left), L, size, depth + 1, ctx);
+    xyCut(right, bbox(right), R, size, depth + 1, ctx);
     out.push(...hoistDisplay(L, R, size));
     return;
   }
@@ -613,8 +649,8 @@ function xyCut(els, colBox, out, size, depth = 0) {
   const top = els.filter((e) => e.bot <= cut + 0.01);
   const bot = els.filter((e) => e.top >= cut - 0.01);
   if (!top.length || !bot.length || top.length + bot.length !== els.length) { out.push({ els, colBox }); return; }
-  xyCut(top, colBox, out, size, depth + 1);
-  xyCut(bot, colBox, out, size, depth + 1);
+  xyCut(top, colBox, out, size, depth + 1, ctx);
+  xyCut(bot, colBox, out, size, depth + 1, ctx);
 }
 
 // 영역 성질: 큰 글(본문보다 15% 넘게 큰 글자가 대부분)인가, 마지막 줄 글
@@ -715,7 +751,8 @@ export function analyzePage(page) {
     els.push({ table: t, x0: t.x0, x1: t.x1, top: t.y0, bot: t.y1, y: t.y0 });
   }
   const regions = [];
-  xyCut(els, bbox(els.length ? els : [{ x0: 0, x1: page.w, top: 0, bot: page.h }]), regions, size);
+  const hRules = mergeSegs((page.rules || []).filter((r) => r.h), 'y').map((r) => ({ y: r.v, a: r.a, b: r.b }));
+  xyCut(els, bbox(els.length ? els : [{ x0: 0, x1: page.w, top: 0, bot: page.h }]), regions, size, 0, { hRules });
   // 영역 안: 같은 높이 조각은 한 줄로(탭으로 이어)
   const seq = [];
   for (const reg of regions) {
@@ -804,13 +841,24 @@ export function assemble(pagesA, { onProgress } = {}) {
   });
   const minRepeat = Math.max(2, Math.ceil(nPages * 0.4));
   pagesA.forEach((p) => {
+    const zoneOf = (X) => (X.y < p.h * 0.12 ? 'T' : X.y > p.h * 0.88 ? 'B' : null);
+    const hfLike = (X) => {
+      const tt = X.text.trim(), z = zoneOf(X);
+      return PAGE_NUM.test(tt) || PAGE_WORD.test(tt) || (!!z && nPages >= 2 && (zoneCount.get(z + hfKey(tt)) || 0) >= minRepeat);
+    };
+    const lines = p.seq.filter((x) => x.line).map((x) => x.line);
     for (const it of p.seq) {
       if (!it.line) continue;
       const L = it.line;
-      const zone = L.y < p.h * 0.12 ? 'T' : L.y > p.h * 0.88 ? 'B' : null;
+      const zone = zoneOf(L);
       if (!zone) continue;
       const t = L.text.trim();
-      if (PAGE_NUM.test(t) || PAGE_WORD.test(t)) { L.hf = true; continue; }
+      // 쪽 번호는 쪽 맨 바깥 줄이다 — 그보다 바깥에 본문 줄이 있으면 그래프 눈금·표 숫자(-33 같은)다
+      if (PAGE_NUM.test(t) || PAGE_WORD.test(t)) {
+        const outer = lines.some((X) => X !== L && (zone === 'B' ? X.y > L.y + L.size * 0.5 : X.y < L.y - L.size * 0.5) && !hfLike(X));
+        if (!outer) L.hf = true;
+        continue;
+      }
       if (nPages >= 2 && (zoneCount.get(zone + hfKey(t)) || 0) >= minRepeat) L.hf = true;
     }
   });
@@ -858,6 +906,8 @@ export function assemble(pagesA, { onProgress } = {}) {
     for (const it of items) if (it.line && !it.line.hf && p.shapes && p.shapes.length) {
       const L = it.line;
       const right = colRight.get(it.colBox) || L.x1;
+      // 상자를 비켜 가는 본문 줄은 단 너비의 절반은 넘는다(서명 옆 도장처럼 짧은 줄 옆 그림은 아니다)
+      if (L.x1 - L.x0 < (right - (colLeft.get(it.colBox) ?? L.x0)) * 0.5) continue;
       let lim = Infinity;
       for (const s of p.shapes) {
         // 글은 상자 둘레에 여백을 두고 비켜 가므로 위아래로 글자 0.6개 높이만큼 넓혀 본다
@@ -1020,7 +1070,8 @@ function shouldContinue(A, L, P, { right, left, lead, dy, sameCol, normalSpace, 
   // 문답(인터뷰): '―'로 시작하는 대답 줄은 앞 줄이 문장부호로 끝났거나 문단이 ▶·■ 같은 표로 시작했으면 새 문단
   if (/^[―—]/.test(L.text) && (/[.?!”’"]$/.test(A.text.trim()) || /^[▶►■◆●□◇○]/.test(P.lines[0].text))) return false;
   // 큰 글(제목·부제·인용구): 줄이 끝까지 찬 경우에만 잇는다(줄마다 따로 쓴 문구가 많다)
-  if (body && A.size >= body * 1.15 && right - A.x1 > A.size) return false;
+  // (영문 제목이 줄을 넘긴 것은 예외: 앞 줄이 글자·쉼표로 끝나고 다음 줄이 소문자로 시작)
+  if (body && A.size >= body * 1.15 && right - A.x1 > A.size && !(/[A-Za-z,’')]$/.test(A.text) && /^[a-z]/.test(L.text))) return false;
   if (dy <= L.size * 0.3) return false;
   if (dy > lead * 1.45) return false;
   if (Math.abs(A.size - L.size) > Math.max(A.size, L.size) * 0.2) return false;

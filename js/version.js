@@ -1,2 +1,2 @@
 // 배포 때 tools/stamp.py 가 이 값을 바꾼다
-export const BUILD = '7503e86cae';
+export const BUILD = '16a20970b3';
