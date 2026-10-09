@@ -1,0 +1,13 @@
+.git
+.gitignore
+.nojekyll
+.assetsignore
+wrangler.jsonc
+README.md
+.wrangler
+_dev
+node_modules
+*.log
+engine/DRE.cs
+engine/build.ps1
+engine/dre.ico

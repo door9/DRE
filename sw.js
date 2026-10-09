@@ -1,6 +1,6 @@
 // DRE 서비스워커 — 인터넷이 없어도 앱이 열리게 앱 파일을 보관한다.
 // 같은 주소(door9.github.io)의 다른 앱 캐시를 건드리지 않도록 dre- 로 시작하는 것만 정리한다.
-const VERSION = 'bbcb757b37';
+const VERSION = '62130e58df';
 const CACHE = `dre-shell-${VERSION}`;
 const RUNTIME = 'dre-runtime-1';
 
@@ -115,11 +115,18 @@ self.addEventListener('install', (event) => {
     await Promise.all(SHELL.map(async (path) => {
       const res = await fetch(new Request(path, { cache: 'reload' }));
       if (!res.ok) throw new Error(`${path} ${res.status}`);
-      await cache.put(path, res);
+      await cache.put(path, await clean(res));
     }));
     await self.skipWaiting();
   })());
 });
+
+// 돌려받은(redirect) 응답은 깨끗한 사본으로 보관·전달한다 — 크롬은 화면 열기에 돌려받은 응답을 쓰면 막는다
+// (Cloudflare 는 /index.html 을 / 로 돌린다. GitHub·DRE.exe 에선 돌림이 없어 그대로)
+async function clean(res) {
+  if (!res || !res.redirected) return res;
+  return new Response(await res.blob(), { status: res.status, statusText: res.statusText, headers: res.headers });
+}
 
 self.addEventListener('activate', (event) => {
   const upgraded = (async () => {
@@ -158,17 +165,23 @@ self.addEventListener('fetch', (event) => {
   if (!url.pathname.startsWith(scope.pathname)) return;
   const rel = url.pathname.slice(scope.pathname.length);
   if (rel.startsWith('v1/') || rel.startsWith('engine/') || rel.startsWith('_dev/')) return; // DRE.exe API·내려받기·개발 파일
+  if (rel === 'sw.js') return; // 화면이 로그인 만료를 확인할 때 — 늘 서버에 묻는다(보관하지 않음)
+  // 다시 로그인(?login=1)은 보관본을 건너뛰고 서버로 간다 — 잠금(Cloudflare Access)이 로그인 화면으로 보낸다
+  if (req.mode === 'navigate' && url.searchParams.has('login')) {
+    event.respondWith(fetch(req).catch(async () => (await clean(await caches.match('./', { cacheName: CACHE }))) || Response.error()));
+    return;
+  }
   event.respondWith((async () => {
     // 앱 파일은 모두 미리 보관해 두었다(PDF 부품 포함) — 인터넷 없이도 그대로 열린다
     const hit = (await caches.match(rel === '' ? './' : rel, { cacheName: CACHE, ignoreSearch: true }))
       || (await caches.match(req, { cacheName: RUNTIME }));
-    if (hit) return hit;
+    if (hit) return clean(hit);
     try {
       const res = await fetch(req);
-      if (res.ok && res.type === 'basic') (await caches.open(RUNTIME)).put(req, res.clone());
+      if (res.ok && res.type === 'basic') (await caches.open(RUNTIME)).put(req, await clean(res.clone()));
       return res;
     } catch {
-      if (req.mode === 'navigate') return (await caches.match('./', { cacheName: CACHE })) || Response.error();
+      if (req.mode === 'navigate') return (await clean(await caches.match('./', { cacheName: CACHE }))) || Response.error();
       return Response.error();
     }
   })());

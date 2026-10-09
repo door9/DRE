@@ -12,6 +12,7 @@ import { toast, local } from './util.js';
 import { BUILD } from './version.js';
 
 const RUN_LABEL = { pdf: 'PDF로 변환', text: '텍스트 추출', merge: 'PDF로 합치기' };
+let loginAsked = false; // 로그인 만료 안내는 화면을 연 동안 한 번만
 
 function syncMode() {
   document.body.dataset.mode = store.mode;
@@ -87,6 +88,14 @@ async function main() {
   syncSaveTarget();
   watchEngine();
 
+  // 다시 로그인하고 돌아온 주소(?login=1)는 지운다
+  const query = new URLSearchParams(location.search);
+  if (query.has('login')) {
+    query.delete('login');
+    const rest = query.toString();
+    history.replaceState(history.state, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+  }
+
   // 오프라인용 보관(서비스워커): PC 안 주소(DRE.exe가 내보냄)·공개 주소 모두. 개발 서버(8410)만 뺀다
   if ('serviceWorker' in navigator && window.isSecureContext && location.port !== '8410') {
     // 새 판이 자리 잡으면 서비스워커가 묻는다: 작업 중이 아니면 바로 새 판으로 다시 열고, 작업 중이면 끝난 뒤에
@@ -105,7 +114,20 @@ async function main() {
       reloadNow();
     });
     on('running', () => { if (pending && !store.running) setTimeout(reloadNow, 1500); });
-    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => {});
+    // Cloudflare 잠금(Access) 로그인이 만료되면 앱은 보관본으로 열리지만 새 판을 못 받는다 — 알리고 다시 로그인하게 한다.
+    // 잠금이 없는 곳(DRE.exe·GitHub)에선 sw.js 가 그대로 오므로 하던 대로 새 판을 확인한다
+    const loginExpired = () => fetch('sw.js', { cache: 'no-store', redirect: 'manual' })
+      .then((res) => res.type === 'opaqueredirect').catch(() => false);
+    navigator.serviceWorker.register('sw.js').then(async (reg) => {
+      if (await loginExpired()) {
+        if (!loginAsked) {
+          loginAsked = true;
+          toast('로그인이 만료되어 새 버전을 받지 못합니다.', { ms: 15000, action: { label: '다시 로그인', run: () => location.assign('./?login=1') } });
+        }
+        return;
+      }
+      return reg.update();
+    }).catch(() => {});
   }
   // 판이 바뀐 뒤 처음 열렸으면 알린다(어느 판인지 확인할 수 있게)
   document.documentElement.dataset.build = BUILD;
