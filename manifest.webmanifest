@@ -2,7 +2,7 @@
   "name": "DRE — 문서 변환",
   "short_name": "DRE",
   "description": "한글·워드 문서를 PDF로, PDF·문서의 글을 TXT로, 여러 문서를 PDF 하나로 (Document Reformatting Engine)",
-  "id": "./",
+  "id": "/DRE/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
