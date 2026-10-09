@@ -28,7 +28,7 @@ export function detectKind(u8, name = '') {
       if (c.has('FileHeader')) return 'hwp';
       if (c.has('WordDocument')) return 'doc';
       if (c.has('Workbook') || c.has('Book')) return 'xls';
-      if (c.has('PowerPoint Document')) return 'ppt';
+      if (c.has('PowerPoint Document') || c.has('PP40')) return 'ppt'; // PP40: 파워포인트 95(해석기가 '옛 판'으로 알린다)
       // 암호 걸린 새 오피스 문서(EncryptedPackage)는 확장자로
       if (c.has('EncryptedPackage')) return ext === 'xlsx' ? 'xlsx' : ext === 'pptx' ? 'pptx' : 'docx';
     } catch { /* 아래로 */ }
@@ -47,12 +47,17 @@ export function detectKind(u8, name = '') {
     if (has('content.xml')) return ext === 'ods' ? 'ods' : ext === 'odp' ? 'odp' : 'odt';
     return { hwpx: 'hwpx', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx' }[ext] || 'unknown';
   }
+  // 이름은 엑셀(.xls)인데 속은 웹 페이지 표나 엑셀 2003 XML 인 것(공공기관·거래소 내려받기에 흔하다) — 엑셀 문서로 다룬다
+  if (ext === 'xls' && (/<(?:!doctype\s+html|html|table|head|body)\b/i.test(head) || /urn:schemas-microsoft-com:office:spreadsheet/.test(head))) return 'xls';
   return 'unknown';
 }
 
 // 형식 묶음
 export const OFFICE = new Set(['hwp', 'hwp3', 'hwpx', 'doc', 'docx', 'rtf', 'odt', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp']);
-export const TEXTABLE = new Set(['pdf', 'hwp', 'hwpx', 'doc', 'docx']); // 앱이 직접 글을 뽑을 수 있는 것
+// 앱이 직접 글을 뽑을 수 있는 것(그림은 문자 인식으로 따로). 옛 한글(hwp3)·배포용 한글은 DRE.exe 를 거친다
+export const TEXTABLE = new Set(['pdf', 'hwp', 'hwpx', 'doc', 'docx', 'rtf', 'odt', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp']);
+export const SHEETS = new Set(['xls', 'xlsx', 'ods']);   // 시트 하나 = 한 쪽(어림)
+export const SLIDES = new Set(['ppt', 'pptx', 'odp']);   // 슬라이드 하나 = 한 쪽(정확)
 export const IMAGES = new Set(['jpg', 'png', 'gif', 'bmp', 'webp']);
 
 // DRE.exe(한글·워드…)에게 보낼 때 쓸 확장자

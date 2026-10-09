@@ -8,6 +8,10 @@ import { SPACING } from './spacingdata.js';
 export let SPACING_WEIGHT = 1.0;
 export function setSpacingWeight(w) { SPACING_WEIGHT = w; } // 시험용 조절
 
+// 국어사전 명사 목록(dict.js 가 채운다 — 없으면 사전 근거 없이 판단)
+let DICT = null;
+export function setDictionary(d) { DICT = d; }
+
 // 글머리표·번호로 시작하는 줄(새 항목 → 앞 줄과 잇지 않는다)
 // (▲·△는 보도자료에서 '▲가 ▲나'처럼 문장 안에서 늘어놓을 때가 많아 넣지 않는다)
 const BULLET_CHARS = '□■◆◇○●◦•▪▫▶▷►▸▹➢➤➣※★☆✓✔❍❏❑⦁◈▣◎◉⊙⇒⇨→☞◐◑';
@@ -147,6 +151,25 @@ export class WordStats {
 }
 
 const STEM_TAILS = ['에서', '에게', '으로', '까지', '부터', '처럼', '보다', '만큼', '에는', '에도', '와의', '과의', '이라', '이다', '은', '는', '이', '가', '을', '를', '의', '에', '와', '과', '도', '로', '만'];
+
+// 사전 근거에 쓰는 꼴
+// 하다·되다·시키다가 붙은 꼴(명사 뒤 줄 첫머리)
+const HADA_FORM = /^(?:할|하는|하여|하고|하며|하면|하지|하거나|하기|하던|하도록|하려|해서|해야|해|함|합니다|하였|했|한다|한|됨|되는|되어|되고|되며|되면|된다|된|될|됐|되었|시키|시켜|시킨|받는|받아|받았|받을|받기|받게|받으|당한|당하)/;
+// '한 번'·'한 명'의 '한'(하나)은 하다 꼴이 아니다
+const DET_HAN = /^한\s+(?:번|명|개|가지|곳|차례|달|해|사람|건|쪽|권|장|대|살|시간|주|분|가운데)/;
+// 꾸미는 꼴로 끝나는 말(구체적인·하는·있는…)
+const ADNOMINAL = /(?:적인|하는|되는|있는|없는|하던|되던|이라는|라는|위한|대한|관한|따른|통한|인한|같은)$/;
+// 조사를 뗀 명사(증거가 → 증거)
+function stemOf(w) {
+  if (!DICT) return null;
+  for (const suf of STEM_TAILS) {
+    if (w.length - suf.length >= 2 && w.endsWith(suf)) {
+      const st = w.slice(0, -suf.length);
+      if (DICT.has(st)) return st;
+    }
+  }
+  return null;
+}
 // 홀로 선 한 글자 토막이 조사·어미 꼴이면(…근로자 과 | 반) 낱말일 수 없다 → 잘린 낱말
 const LONE_TAIL = /^[과와을를는에로의고며]$/;
 
@@ -225,6 +248,21 @@ export function joinScore(a, b, stats, hint = {}) {
   }
   if (dep) score += 3;
   else if (HADA.test(B0)) score += 1.5;
+  // 사전 근거(시험 묶음 3,174곳에서 하나씩 재어 도움이 된 것만: 91.08% → 91.30%)
+  // 둘 다 사전 명사면 띄우기, 붙인 말이 사전에 있으면 붙이기는 효과가 없거나 나빠져 넣지 않았다 — 합성어 띄어쓰기는 쓰는 사람마다 다르다
+  if (DICT) {
+    const TD = globalThis.__DRE_JOIN_TUNE || {};
+    const nounA = Ak.length >= 2 && DICT.has(Ak);
+    const bStem = Bk.length >= 2 && DICT.has(Bk) ? Bk : stemOf(Bk);
+    // 명사 + 하다·되다·시키다 꼴(지정 | 할 수 → 지정할 수): 하다는 붙여 쓰는 것이 맞춤법
+    if (nounA && HADA_FORM.test(B0) && !DET_HAN.test(B0)) score += TD.hd ?? 4;
+    // 꾸미는 말 끝(구체적인 | 증거가): 앞이 명사가 아니고 꾸미는 꼴로 끝나며 뒤가 명사로 시작
+    if (!nounA && bStem && ADNOMINAL.test(Ak) && !dep) score -= TD.ad ?? 1.5;
+    // 낱말 중간에서 잘린 줄(형제자 | 매로, 일어 | 나지): 앞 토막은 사전에 없는데 뒤 첫 글자들을 붙이면 사전 낱말이 된다
+    if (!nounA && !stemOf(Ak) && Ak.length >= 2) {
+      for (let j = 1; j <= Math.min(3, Bk.length); j++) if (DICT.has(Ak + Bk.slice(0, j))) { score += TD.pj ?? 3; break; }
+    }
+  }
   // 일반적인 한글 띄어쓰기 경향(음절 통계): 띄움 확률이 낮을수록 붙인다
   const ps = spaceProb(Ak, Bk);
   if (ps != null) score += -logit(ps) * SPACING_WEIGHT;
@@ -290,16 +328,23 @@ export function resolveSoftBreaks(doc) {
       items.push(it);
     }
     assign(() => {
-      let out = parts[0];
+      // \uc870\uac01\uc744 \ubaa8\uc544 \ub9c8\uc9c0\ub9c9\uc5d0 \uc787\ub294\ub2e4(\uc774\uc5b4 \ubd99\uc778 \uae00 \uc804\uccb4\ub97c \ub9e4\ubc88 \ub2e4\ub4ec\uc73c\uba74 \uc904\ubc14\uafc8\uc774 \ub9ce\uc744 \ub54c \uc81c\uacf1\uc73c\ub85c \ub290\ub824\uc9c4\ub2e4)
+      const pieces = [parts[0]];
+      const trimTail = () => { // \ubaa8\uc740 \uae00 \ub05d\uc758 \ube48\uce78 \uc9c0\uc6b0\uae30(\ube48\uce78\ubfd0\uc778 \uc870\uac01\uc740 \ud1b5\uc9f8\ub85c)
+        while (pieces.length) {
+          const t = pieces[pieces.length - 1].replace(/[ \t\u3000]+$/, '');
+          if (t) { pieces[pieces.length - 1] = t; return; }
+          pieces.pop();
+        }
+      };
       for (let i = 0; i < codes.length; i++) {
         const c = codes[i].code;
-        const left = out.replace(/[ \t\u3000]+$/, '');
-        const right = parts[i + 1].replace(/^[ \t\u3000]+/, '');
-        if (c === 'H') out = out + '\n' + parts[i + 1];
-        else if (c === 'D') out = left.replace(/-$/, '') + SOFT_NONE + right;
-        else out = left + (c === 'N' ? SOFT_NONE : SOFT_SPACE) + right;
+        if (c === 'H') { pieces.push('\n', parts[i + 1]); continue; }
+        trimTail();
+        if (c === 'D' && pieces.length) pieces[pieces.length - 1] = pieces[pieces.length - 1].replace(/-$/, '');
+        pieces.push(c === 'N' || c === 'D' ? SOFT_NONE : SOFT_SPACE, parts[i + 1].replace(/^[ \t\u3000]+/, ''));
       }
-      return out;
+      return pieces.join('');
     });
   };
   const later = [];

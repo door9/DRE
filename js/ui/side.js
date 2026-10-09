@@ -3,7 +3,7 @@ import { store, on, selectedItem, updateItem, emit } from '../store.js';
 import { settings, saveSettings, renderOptions } from '../settings.js';
 import { h, ico, esc, fmtNum, infoToggle, toast, debounce, baseName } from '../util.js';
 import { parseRange, formatRange, render } from '../core/model.js';
-import { IMAGES, OFFICE, kindLabel } from '../core/detect.js';
+import { IMAGES, OFFICE, SHEETS, SLIDES, kindLabel } from '../core/detect.js';
 import { ensurePdf, ensureText } from '../produce.js';
 import { openThumbDoc, renderThumb } from '../thumbs.js';
 import { engine, engineReady, launchEngine, onEngine } from '../engine.js';
@@ -47,7 +47,8 @@ function rangeSection(it, { open = true } = {}) {
   const showStatus = () => {
     const t = pagesTotal();
     const n = it.range ? it.range.length : t;
-    status.textContent = t ? `${fmtNum(t)}쪽 중 ${fmtNum(n)}쪽` : '';
+    const unit = it.sheetPages && !it.pdfPages ? '시트' : '쪽'; // 엑셀은 실제 쪽 수를 알기 전까지 시트 단위
+    status.textContent = t ? `${fmtNum(t)}${unit} 중 ${fmtNum(n)}${unit}` : '';
     input.classList.remove('bad');
   };
   function commit(list) {
@@ -111,7 +112,9 @@ function rangeSection(it, { open = true } = {}) {
         note.innerHTML = '';
         note.append(
           h('div', { text: `${kindLabel(it.kind)} 문서의 쪽 그림을 보려면 DRE가 켜져 있어야 합니다.` }),
-          h('div', { text: it.pages ? `(문서 안 정보로 어림한 쪽 수: 약 ${it.pages}쪽 — 칸에 직접 적어 고를 수 있습니다)` : '' }),
+          h('div', { text: !it.pages ? '' : SLIDES.has(it.kind) ? `(슬라이드 ${it.pages}장 — 칸에 직접 적어 고를 수 있습니다)`
+            : SHEETS.has(it.kind) ? `(시트 ${it.pages}개 — 시트 하나를 한 쪽으로 셉니다. 칸에 직접 적어 고를 수 있습니다)`
+              : `(문서 안 정보로 어림한 쪽 수: 약 ${it.pages}쪽 — 칸에 직접 적어 고를 수 있습니다)` }),
           h('button.btn', { type: 'button', style: 'margin-top:8px', html: `${ico('plug')}DRE 켜기`, onclick: () => launchEngine() }),
         );
         return;
@@ -195,7 +198,8 @@ function textOptionsBar(onChange) {
     infoToggle(`<p><b>줄 이어 붙이기</b>: PDF처럼 줄이 중간에 끊긴 글을 문장으로 다시 잇습니다('되었' + '습니다' → '되었습니다'). 끄면 원래 줄대로 둡니다.</p>
       <p><b>머리말·쪽 번호 빼기</b>: 쪽마다 되풀이되는 머리말·꼬리말과 쪽 번호를 뺍니다(PDF).</p>
       <p><b>표</b>: 탭 = 칸 사이를 탭으로(엑셀·한글 표에 붙여 넣기 좋음), 선 = 선으로 그린 표(고정폭 글꼴용), 줄글 = 칸마다 한 줄.</p>
-      <p><b>쪽 표시</b>: 쪽이 바뀌는 곳에 '── 3쪽 ──'을 넣습니다.</p>`),
+      <p><b>쪽 표시</b>: 쪽이 바뀌는 곳에 '── 3쪽 ──'을 넣습니다.</p>
+      <p><b>문자 인식</b>: 스캔한 PDF의 쪽과 그림은 그림 속 글자를 읽어 냅니다(인터넷 없이). 틀린 글자가 있을 수 있어 중요한 숫자·이름은 원본과 맞춰 보세요.</p>`),
   );
   return bar;
 }
@@ -243,15 +247,14 @@ function textSection(it) {
     if (textAbort) textAbort.abort();
     const ac = new AbortController();
     textAbort = ac;
-    if (IMAGES.has(it.kind)) { out.value = ''; stat.textContent = ''; warnBox.hidden = false; warnBox.textContent = '그림에서는 글을 뽑을 수 없습니다(문자 인식이 필요).'; return; }
     if (it.needsPassword && !it.password) { askPassword(it, () => load()); return; }
     out.value = '';
     stat.innerHTML = '<span class="spin" style="display:inline-block;vertical-align:middle"></span> 글 뽑는 중…';
     try {
       doc = await ensureText(it, {
         range: it.range, signal: ac.signal,
-        onProgress: (v) => { if (textAbort === ac) stat.textContent = `글 뽑는 중… ${Math.round(v * 100)}%`; },
-        onState: (s) => { if (textAbort === ac) stat.textContent = s === 'engine' ? '쪽을 맞추려고 PDF 만드는 중…' : s === 'engine-wait' ? '차례 기다리는 중…' : '글 뽑는 중…'; },
+        onProgress: (v, note) => { if (textAbort === ac) stat.textContent = `${note === 'ocr' ? '문자 인식 중' : '글 뽑는 중'}… ${Math.round(v * 100)}%`; },
+        onState: (s) => { if (textAbort === ac) stat.textContent = s === 'engine' ? '쪽을 맞추려고 PDF 만드는 중…' : s === 'engine-wait' ? '차례 기다리는 중…' : s === 'ocr' ? '문자 인식 중…' : '글 뽑는 중…'; },
       });
       if (textAbort !== ac || current !== it) return;
       draw();
@@ -319,7 +322,7 @@ export function renderSide() {
   if (!it) {
     box.append(h('div.side-note', { html: mode === 'pdf'
       ? '한글·워드·엑셀·파워포인트 문서와 그림을 PDF로 바꿉니다.<br>파일을 넣고 고르면 쪽을 골라 바꿀 수 있습니다.'
-      : 'PDF·한글·워드 문서의 글을 TXT로 뽑습니다.<br>파일을 고르면 여기에 뽑은 글이 보입니다.' }));
+      : 'PDF·한글·워드·엑셀·파워포인트 문서와 그림의 글을 TXT로 뽑습니다.<br>파일을 고르면 여기에 뽑은 글이 보입니다.' }));
     return;
   }
   box.append(h('div.side-head', {}, h('h2', { text: it.name, title: it.name })));

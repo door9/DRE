@@ -105,7 +105,7 @@ function tableTab(rows) {
   for (const r of rows) {
     const full = r.filter((c) => c && cellText(c).trim() !== '');
     if (full.length === 1) {
-      for (const l of cellText(full[0]).split('\n')) if (l.trim()) out.push(l.replace(/\s+$/, ''));
+      for (const l of cellText(full[0]).split('\n')) if (l.trim()) out.push(l.trimEnd());
       continue;
     }
     const line = r.map((c) => cellText(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\t/g, ' ')).join('\t').replace(/\t+$/, '');
@@ -120,7 +120,7 @@ function tableLines(rows) {
     const cells = r.filter((c) => c && cellText(c).trim() !== '').map((c) => cellText(c).trim());
     if (!cells.length) continue;
     if (out.length) out.push('');
-    out.push(...cells.join('\n').split('\n'));
+    for (const l of cells.join('\n').split('\n')) out.push(l); // 펼침(...) 대신 하나씩: 아주 긴 표에서 인자 수 한계로 멈추지 않게
   }
   return out;
 }
@@ -137,7 +137,7 @@ function wrapDisplay(s, width) {
       const ww = dispWidth(w);
       if (lw + ww <= width) { line += w; lw += ww; continue; }
       if (/^\s+$/.test(w)) { out.push(line); line = ''; lw = 0; continue; }
-      if (line.trim()) { out.push(line.replace(/\s+$/, '')); line = ''; lw = 0; }
+      if (line.trim()) { out.push(line.trimEnd()); line = ''; lw = 0; }
       // 낱말 하나가 폭보다 길면 글자 단위로 자른다
       for (const ch of w) {
         const cw = dispWidth(ch);
@@ -145,7 +145,7 @@ function wrapDisplay(s, width) {
         line += ch; lw += cw;
       }
     }
-    out.push(line.replace(/\s+$/, ''));
+    out.push(line.trimEnd());
   }
   return out;
 }
@@ -155,7 +155,8 @@ function padDisplay(s, width) {
 }
 
 function tableGrid(rows) {
-  const ncol = Math.max(0, ...rows.map((r) => r.length));
+  let ncol = 0;
+  for (const r of rows) if (r.length > ncol) ncol = r.length;
   if (!ncol) return [];
   const MAXW = 36;
   const widths = new Array(ncol).fill(2);
@@ -170,7 +171,9 @@ function tableGrid(rows) {
     r.forEach((c, j) => {
       const cs = c ? c.cs || 1 : 1;
       if (!c || cs <= 1) return;
-      const need = Math.min(MAXW * cs, Math.max(...cellText(c).split('\n').map((l) => dispWidth(l.trim()))));
+      let longest = 0;
+      for (const l of cellText(c).split('\n')) longest = Math.max(longest, dispWidth(l.trim()));
+      const need = Math.min(MAXW * cs, longest);
       let have = 0;
       for (let k = j; k < Math.min(ncol, j + cs); k++) have += widths[k];
       have += 3 * (cs - 1);
@@ -191,7 +194,8 @@ function tableGrid(rows) {
       cols.push({ w, lines: wrapDisplay(cellText(c).trim(), w) });
       j += cs;
     }
-    const h = Math.max(1, ...cols.map((c) => c.lines.length));
+    let h = 1;
+    for (const c of cols) if (c.lines.length > h) h = c.lines.length;
     for (let k = 0; k < h; k++) out.push('│ ' + cols.map((c) => padDisplay(c.lines[k] || '', c.w)).join(' │ ') + ' │');
     out.push(ri === rows.length - 1 ? line('└', '┴', '┘') : line('├', '┼', '┤'));
   });
@@ -243,7 +247,7 @@ export function render(doc, options = {}, range = null) {
       const tl = renderTable(b, opts).map((l) => cleanNotes(l, opts));
       if (!tl.length) continue;
       if (opts.blank !== 'none') pushBlank();
-      lines.push(...tl);
+      for (const l of tl) lines.push(l);
       if (opts.blank !== 'none') lines.push('');
       started = true;
       continue;
@@ -252,7 +256,7 @@ export function render(doc, options = {}, range = null) {
     if (text == null) continue;
     text = cleanNotes(softText(text, opts), opts);
     const pad = opts.indent && b.lvl > 0 ? opts.indent.repeat(Math.min(8, b.lvl)) : '';
-    for (const l of text.split('\n')) lines.push(pad + l.replace(/\s+$/, ''));
+    for (const l of text.split('\n')) lines.push(pad + l.trimEnd()); // trimEnd: 아주 긴 빈칸에서도 한 번에(정규식 /\s+$/ 은 제곱으로 느려진다)
     started = true;
   }
 

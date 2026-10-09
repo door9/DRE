@@ -17,16 +17,19 @@ function kindClass(kind) {
   return '';
 }
 
+// 엑셀은 DRE가 PDF로 바꿔 실제 쪽 수를 알기 전까지 시트 수로 보인다
+const sheetCount = (it) => it.sheetPages && !it.pdfPages;
+
 function rangeLabel(it) {
   if (it.range && !it.range.length) return '고른 쪽 없음';
-  if (it.range) return `${formatRange(it.range)}쪽`;
-  if (it.pages) return `전체 ${it.pages}쪽`;
+  if (it.range) return `${formatRange(it.range)}${sheetCount(it) ? '시트' : '쪽'}`;
+  if (it.pages) return sheetCount(it) ? `전체 ${it.pages}시트` : `전체 ${it.pages}쪽`;
   return '전체';
 }
 
 function metaHtml(it) {
   const parts = [];
-  if (it.pages) parts.push(`${it.pageExact ? '' : '약 '}${it.pages}쪽`);
+  if (it.pages) parts.push(sheetCount(it) ? `시트 ${it.pages}개` : `${it.pageExact ? '' : '약 '}${it.pages}쪽`);
   else if (!it.probed) parts.push('살펴보는 중…');
   parts.push(fmtBytes(it.size));
   let html = esc(parts.join(' · '));

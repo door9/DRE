@@ -336,7 +336,7 @@ function mergeSegs(segs, key) {
 export function findTables(rules) {
   const H = mergeSegs(rules.filter((r) => r.h), 'y').filter((s) => s.b - s.a >= 4);
   const V = mergeSegs(rules.filter((r) => !r.h), 'x').filter((s) => s.b - s.a >= 4);
-  if (H.length < 2 || V.length < 2 || H.length * V.length > 400000) return [];
+  if (H.length < 2 || V.length < 1 || H.length * V.length > 400000) return [];
   // 만나는 것끼리 묶기
   const n = H.length + V.length;
   const parent = Array.from({ length: n }, (_, i) => i);
@@ -360,7 +360,7 @@ export function findTables(rules) {
   }
   const tables = [];
   for (const c of comps.values()) {
-    if (c.h.length < 2 || c.v.length < 2) continue;
+    if (c.h.length < 2 || c.v.length < 1) continue;
     const cluster = (vals) => {
       const s = [...vals].sort((a, b) => a - b);
       const out = [];
@@ -369,6 +369,21 @@ export function findTables(rules) {
     };
     const xs = cluster(c.v.map((s) => s.v));
     const ys = cluster(c.h.map((s) => s.v));
+    // 양옆이 열린 표(바깥 세로 테두리가 없는 한글 공문 서식 등): 가로선 여럿이 같은 자리에서 끝나면 그 자리를 표의 바깥 경계로
+    if (xs.length >= 1 && c.h.length >= 3) {
+      const edge = (vals, beyond) => {
+        const cand = cluster(vals.filter(beyond));
+        let best = null, bn = 0;
+        for (const x of cand) { const n = vals.filter((v) => Math.abs(v - x) <= 3).length; if (n > bn) { bn = n; best = x; } }
+        return best != null && bn >= Math.max(3, c.h.length * 0.6) ? best : null;
+      };
+      const L = edge(c.h.map((s) => s.a), (v) => v < xs[0] - 5);
+      const R = edge(c.h.map((s) => s.b), (v) => v > xs[xs.length - 1] + 5);
+      if (L != null) xs.unshift(L);
+      if (R != null) xs.push(R);
+      // 세로선이 하나뿐이면 양쪽 경계를 다 찾았을 때만 표(두 칸)
+      if (c.v.length < 2 && (L == null || R == null)) continue;
+    } else if (c.v.length < 2) continue;
     if (xs.length < 2 || ys.length < 2) continue;
     const nr = ys.length - 1, nc = xs.length - 1;
     if (nr * nc > 20000) continue;

@@ -1,12 +1,12 @@
 // 실행 — 고른 할 일(PDF로 변환 / 텍스트 추출 / PDF 합치기)을 목록 차례대로 처리하고 저장한다
 import { store, updateItem, emit } from './store.js';
 import { settings, renderOptions } from './settings.js';
-import { ensurePdf, ensureText, needsEngine } from './produce.js';
+import { ensurePdf, ensureText, needsEngine, textNeedsEngine } from './produce.js';
 import { runJob, cancelAll } from './jobs.js';
 import { prepareSave, saveOutput, textBlob } from './save.js';
 import { render, formatRange } from './core/model.js';
 import { engineReady, launchEngine, engineCan } from './engine.js';
-import { OFFICE, IMAGES } from './core/detect.js';
+import { OFFICE, IMAGES, TEXTABLE } from './core/detect.js';
 import { baseName, toast } from './util.js';
 
 let abort = null;
@@ -24,10 +24,7 @@ export function whyNot(it, mode) {
     if (it.kind === 'pdf' && !it.range) return '이미 PDF(건너뜀)';
     return null;
   }
-  if (mode === 'text') {
-    if (IMAGES.has(it.kind)) return '그림은 글을 뽑을 수 없습니다';
-    return null;
-  }
+  if (mode === 'text') return null; // 그림은 문자 인식으로 읽는다
   return null;
 }
 
@@ -68,8 +65,8 @@ export async function runAll() {
 
 async function runInner(mode, items) {
 
-  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다
-  const wantEngine = items.some((it) => needsEngine(it) && (mode !== 'text' || !['hwp', 'hwpx', 'docx', 'doc'].includes(it.kind) || it.range));
+  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만)
+  const wantEngine = items.some((it) => (mode === 'text' ? textNeedsEngine(it) : needsEngine(it)));
   let enginePromise = null;
   if (wantEngine && !engineReady()) enginePromise = launchEngine();
 
@@ -85,8 +82,12 @@ async function runInner(mode, items) {
     setStatus('DRE를 켜는 중…');
     if (!(await enginePromise)) {
       setStatus('');
-      toast('DRE를 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.', { bad: true, ms: 6000 });
-      import('./ui/dialogs.js').then((m) => m.openEngineDialog());
+      // 글 뽑기에서 DRE가 꼭 있어야 하는 것은 옛 한글·배포용 한글뿐(나머지는 쪽을 어림해 직접 뽑는다)
+      const hard = mode !== 'text' || items.some((it) => (OFFICE.has(it.kind) && !TEXTABLE.has(it.kind)) || it.probeError === 'distribution');
+      if (hard) {
+        toast(mode === 'text' ? 'DRE를 켜지 못해 옛 한글·배포용 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.', { bad: true, ms: 6000 });
+        import('./ui/dialogs.js').then((m) => m.openEngineDialog());
+      } else toast('DRE를 켜지 못해 쪽 나눔은 문서 안 정보로 어림합니다.', { ms: 5000 });
     }
   }
 
@@ -163,8 +164,8 @@ async function convertOne(it, session) {
 
 async function textOne(it, session) {
   const signal = abort.signal;
-  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' ? '쪽 맞추려고 PDF 만드는 중' : '글 뽑는 중' });
-  const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v) => updateItem(it, { progress: v }) });
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' ? '쪽 맞추려고 PDF 만드는 중' : s === 'ocr' ? '문자 인식 중' : '글 뽑는 중' });
+  const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v, note) => updateItem(it, note === 'ocr' ? { progress: v, msg: '문자 인식 중' } : { progress: v }) });
   const text = render(doc, renderOptions(), it.range ? new Set(it.range) : null);
   const blob = textBlob(text, { bom: settings.bom });
   const saved = await saveOutput(session, it, `${baseName(it.name)}.txt`, blob);

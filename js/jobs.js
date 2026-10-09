@@ -15,7 +15,14 @@ function makeWorker() {
   w.onmessage = (e) => {
     const m = e.data;
     if (!active || m.id !== active.id) return;
-    if (m.type === 'progress') { active.onProgress && active.onProgress(m.value); return; }
+    if (m.type === 'progress') {
+      // 진행이 있으면 시간 제한을 다시 잰다(문자 인식처럼 오래 걸려도 멈춘 것이 아니면 끊지 않게)
+      clearTimeout(active.timer);
+      const job = active;
+      job.timer = setTimeout(() => { if (active === job) crash(Object.assign(new Error('너무 오래 걸려 멈췄습니다'), { code: 'timeout' })); }, job.timeoutMs);
+      active.onProgress && active.onProgress(m.value, m.note);
+      return;
+    }
     const job = active;
     finish();
     if (m.type === 'done') job.resolve(m.result);
@@ -57,7 +64,7 @@ function pump() {
   if (job.cancelled) { job.reject(Object.assign(new Error('취소했습니다'), { code: 'cancelled' })); pump(); return; }
   active = job;
   if (!worker) worker = makeWorker();
-  job.timer = setTimeout(() => crash(Object.assign(new Error('너무 오래 걸려 멈췄습니다'), { code: 'timeout' })), job.timeoutMs);
+  job.timer = setTimeout(() => { if (active === job) crash(Object.assign(new Error('너무 오래 걸려 멈췄습니다'), { code: 'timeout' })); }, job.timeoutMs);
   try {
     worker.postMessage({ id: job.id, type: job.type, ...job.payload }, job.transfer);
   } catch (e) {

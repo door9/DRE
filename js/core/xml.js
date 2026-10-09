@@ -21,8 +21,10 @@ function localName(n) {
 
 const ATTR = /([^\s=\/>]+)\s*=\s*("([^"]*)"|'([^']*)')/g;
 
-export function parseXml(src) {
+// keepSpace: 요소 사이의 공백뿐인 글도 남긴다(ODF 처럼 글 조각 사이 빈칸이 뜻을 갖는 형식)
+export function parseXml(src, { keepSpace = false } = {}) {
   const root = { n: '#doc', l: '#doc', a: {}, c: [] };
+  const pushText = keepSpace ? (el, raw) => { el.c.push(decodeEntities(raw)); } : pushTextTrim;
   const stack = [root];
   let i = 0;
   const len = src.length;
@@ -89,7 +91,7 @@ export function parseXml(src) {
   return root;
 }
 
-function pushText(el, raw) {
+function pushTextTrim(el, raw) {
   // 요소 사이 공백뿐인 글은 버린다(글자 요소 안의 공백은 남는다: 아래 txt 는 <w:t>, <hp:t> 안에서만 쓰임)
   if (/^[\s]*$/.test(raw) && !isTextHolder(el)) return;
   el.c.push(decodeEntities(raw));

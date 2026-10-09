@@ -1,6 +1,6 @@
 // DRE 서비스워커 — 인터넷이 없어도 앱이 열리게 앱 파일을 보관한다.
 // 같은 주소(door9.github.io)의 다른 앱 캐시를 건드리지 않도록 dre- 로 시작하는 것만 정리한다.
-const VERSION = '611ca2b83d';
+const VERSION = '8540344049';
 const CACHE = `dre-shell-${VERSION}`;
 const RUNTIME = 'dre-runtime-1';
 
@@ -9,11 +9,17 @@ const SHELL = [
   'icons/icon-512.png', 'icons/icon-64.png', 'icons/icon-maskable-512.png', 'icons/icon.svg', 'js/engine.js',
   'js/intake.js', 'js/jobs.js', 'js/main.js', 'js/produce.js', 'js/run.js', 'js/save.js', 'js/settings.js',
   'js/store.js', 'js/thumbs.js', 'js/util.js', 'js/version.js', 'vendor/fflate.LICENSE', 'vendor/fflate.mjs',
-  'vendor/pdf-lib.mjs', 'js/core/align.js', 'js/core/cfb.js', 'js/core/detect.js', 'js/core/doc.js',
-  'js/core/docx.js', 'js/core/hwp.js', 'js/core/hwpx.js', 'js/core/joiner.js', 'js/core/model.js',
-  'js/core/numfmt.js', 'js/core/pagetrack.js', 'js/core/pdfextract.js', 'js/core/pdflayout.js', 'js/core/pdfops.js',
-  'js/core/spacingdata.js', 'js/core/xml.js', 'js/ui/dialogs.js', 'js/ui/list.js', 'js/ui/side.js',
-  'js/worker/task.js', 'vendor/pdfjs/LICENSE', 'vendor/pdfjs/pdf.min.mjs', 'vendor/pdfjs/pdf.worker.min.mjs',
+  'vendor/pdf-lib.mjs', 'js/core/align.js', 'js/core/cfb.js', 'js/core/detect.js', 'js/core/dict.js',
+  'js/core/dictdata.js', 'js/core/doc.js', 'js/core/docx.js', 'js/core/hwp.js', 'js/core/hwpx.js',
+  'js/core/joiner.js', 'js/core/model.js', 'js/core/numfmt.js', 'js/core/ocr.js', 'js/core/odf.js',
+  'js/core/pagetrack.js', 'js/core/pdfextract.js', 'js/core/pdflayout.js', 'js/core/pdfops.js', 'js/core/ppt.js',
+  'js/core/pptx.js', 'js/core/rtf.js', 'js/core/sheet.js', 'js/core/slides.js', 'js/core/spacingdata.js',
+  'js/core/symbols.js', 'js/core/xlfmt.js', 'js/core/xls.js', 'js/core/xlsml.js', 'js/core/xlsx.js',
+  'js/core/xml.js', 'js/ui/dialogs.js', 'js/ui/list.js', 'js/ui/side.js', 'js/worker/task.js',
+  'vendor/mecab-ko-dic/LICENSE', 'vendor/pdfjs/LICENSE', 'vendor/pdfjs/pdf.min.mjs',
+  'vendor/pdfjs/pdf.worker.min.mjs', 'vendor/tesseract/tesseract-core-simd-lstm.js',
+  'vendor/tesseract/tesseract-core-simd-lstm.wasm', 'vendor/tesseract/tesseract.esm.min.js',
+  'vendor/tesseract/worker.min.js', 'vendor/tesseract/worker.min.js.LICENSE.txt',
   'vendor/pdfjs/cmaps/78-EUC-H.bcmap', 'vendor/pdfjs/cmaps/78-EUC-V.bcmap', 'vendor/pdfjs/cmaps/78-H.bcmap',
   'vendor/pdfjs/cmaps/78-RKSJ-H.bcmap', 'vendor/pdfjs/cmaps/78-RKSJ-V.bcmap', 'vendor/pdfjs/cmaps/78-V.bcmap',
   'vendor/pdfjs/cmaps/78ms-RKSJ-H.bcmap', 'vendor/pdfjs/cmaps/78ms-RKSJ-V.bcmap',
@@ -100,6 +106,7 @@ const SHELL = [
   'vendor/pdfjs/wasm/LICENSE_QCMS', 'vendor/pdfjs/wasm/jbig2.wasm', 'vendor/pdfjs/wasm/jbig2_nowasm_fallback.js',
   'vendor/pdfjs/wasm/openjpeg.wasm', 'vendor/pdfjs/wasm/openjpeg_nowasm_fallback.js',
   'vendor/pdfjs/wasm/qcms_bg.wasm', 'vendor/pdfjs/wasm/quickjs-eval.js', 'vendor/pdfjs/wasm/quickjs-eval.wasm',
+  'vendor/tesseract/lang/eng.traineddata.gz', 'vendor/tesseract/lang/kor.traineddata.gz',
 ];
 
 self.addEventListener('install', (event) => {

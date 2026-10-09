@@ -4,8 +4,8 @@ import { makeItem, addItems, updateItem, store, emit } from './store.js';
 import { runJob } from './jobs.js';
 import { extOf, toast } from './util.js';
 
-export const ACCEPT_EXT = new Set(['hwp', 'hwpx', 'hwt', 'doc', 'docx', 'rtf', 'odt', 'pdf', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']);
-const EXT_KIND = { jpeg: 'jpg', hwt: 'hwp' };
+export const ACCEPT_EXT = new Set(['hwp', 'hwpx', 'hwt', 'doc', 'docx', 'docm', 'rtf', 'odt', 'pdf', 'xls', 'xlsx', 'xlsm', 'ods', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'odp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']);
+const EXT_KIND = { jpeg: 'jpg', hwt: 'hwp', docm: 'docx', xlsm: 'xlsx', pptm: 'pptx', ppsx: 'pptx', pps: 'ppt' };
 const MAX_FILES = 500;
 
 function guessKind(name) {
@@ -43,6 +43,7 @@ export function probe(it) {
       else if (r.error === 'password') patch.probeMsg = '암호가 걸린 문서입니다(한글·워드에서 암호를 풀어 저장한 뒤 넣어 주세요)';
     } else {
       patch.pages = r.pages ?? null;
+      patch.sheetPages = !!r.sheetPages; // 엑셀: 쪽 수가 아니라 시트 수
       patch.pageExact = !!r.pageExact;
     }
     updateItem(it, patch);
@@ -57,7 +58,7 @@ export async function pickFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         id: 'dre-open', multiple: true,
-        types: [{ description: '문서', accept: { 'application/octet-stream': ['.hwp', '.hwpx', '.doc', '.docx', '.pdf', '.rtf', '.odt', '.xls', '.xlsx', '.ppt', '.pptx', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'] } }],
+        types: [{ description: '문서', accept: { 'application/octet-stream': ['.hwp', '.hwpx', '.doc', '.docx', '.docm', '.pdf', '.rtf', '.odt', '.xls', '.xlsx', '.xlsm', '.ods', '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'] } }],
       });
       const entries = [];
       for (const h of handles) entries.push({ file: await h.getFile(), handle: h });
