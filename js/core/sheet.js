@@ -21,7 +21,7 @@ export function sheetsToModel(format, sheets) {
     const rows = denseRows(sh, MAX_CELLS - total);
     total += rows.count;
     if (rows.cut) cut = true;
-    if (rows.rows.length) blocks.push({ t: 'tbl', rows: rows.rows, pg, gap: 1 });
+    if (rows.rows.length) blocks.push({ t: 'tbl', rows: rows.rows, pg, gap: 1, sheet: true });
     let first = true;
     for (const t of sh.extras || []) {
       for (const line of String(t).split(/\r\n|[\r\n\u000b]/)) {

@@ -7,7 +7,7 @@
 // }
 // 블록:
 //   문단  { t:'p', segs:[{ s:글, pg:쪽 }], joins:'SNHG…'(segs 사이 이음, 길이=segs-1), lvl:들여쓰기 단계, kind:''|'h'|'li'|'hf'|'cap', gap:앞 빈 줄 수, cont:앞 쪽 문단에 이어지는가 }
-//   표    { t:'tbl', rows:[[{ s, cs, rs } | null]], pg, gap }
+//   표    { t:'tbl', rows:[[{ s, cs, rs } | null]], pg, gap, sheet:엑셀 계열 시트인가 }
 // 이음 기호: S=띄어 잇기, N=붙여 잇기(이 둘은 '줄 이어 붙이기'를 끄면 줄바꿈), H=원래 줄바꿈, G=무조건 붙임(쪽 경계 등)
 
 export const NOTE_OPEN = '\ue000';
@@ -100,17 +100,41 @@ function cellText(c) {
 }
 
 // 칸을 탭으로 — 글이 든 칸이 하나뿐인 줄(설명 상자처럼 쓴 표)은 칸 안의 줄바꿈·들여쓰기를 살린다
-function tableTab(rows) {
+// 탭 표: 한 행 = 한 줄, 칸 사이 = 탭(엑셀에 다시 붙여 넣거나 AI 가 표로 읽을 때 열이 맞게).
+// 글이 한 칸뿐인 행도 그 칸이 첫째 열이 아니면 앞 빈칸(탭)을 살려 열 자리를 지킨다(세로로 합친 칸 아래 행, 한 열에만 값이 있는 행).
+// 칸 글만 한 줄(칸 안 줄바꿈도 그대로)로 내보내는 것: 첫째 열 칸, 배치용 표(칸이 둘 넘게 찬 행이 없는 표 — 시트는 빼고),
+// 시트 맨 위(칸이 둘 넘게 찬 첫 행 앞)에서 행 끝까지 가로로 합친 제목 칸. 문서·PDF 표에선 이 꼴이 대개 2단 머리글('불구속' 아래
+// '사전영장 | 체포 | …')이라 열 자리를 지킨다(통계연보 PDF 실측)
+function tableTab(rows, sheet = false) {
   const out = [];
-  for (const r of rows) {
-    const full = r.filter((c) => c && cellText(c).trim() !== '');
+  let width = 0;
+  for (const r of rows) if (r.length > width) width = r.length;
+  const filledOf = (r) => r.filter((c) => c && cellText(c).trim() !== '');
+  const grid = sheet || rows.some((r) => filledOf(r).length >= 2);
+  const cover = []; // 열 → 위에서 세로로 합친 칸(글 있음)이 덮는 마지막 행
+  let headSeen = false;
+  rows.forEach((r, ri) => {
+    const full = filledOf(r);
+    let keep = true; // 열 자리를 지켜 탭 줄로
     if (full.length === 1) {
-      for (const l of cellText(full[0]).split('\n')) if (l.trim()) out.push(l.trimEnd());
-      continue;
+      const c = full[0], i = r.indexOf(c), cs = c.cs || 1;
+      let covered = false;
+      for (let j = 0; j < i; j++) if (cover[j] >= ri) covered = true;
+      const title = sheet && !headSeen && cs >= 2 && i + cs >= width;
+      if (!covered && (i <= 0 || !grid || title)) keep = false;
     }
-    const line = r.map((c) => cellText(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\t/g, ' ')).join('\t').replace(/\t+$/, '');
-    if (line.trim()) out.push(line);
-  }
+    if (full.length >= 2) headSeen = true;
+    if (!keep) {
+      for (const l of cellText(full[0]).split('\n')) if (l.trim()) out.push(l.trimEnd());
+    } else {
+      const line = r.map((c) => cellText(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\t/g, ' ')).join('\t').replace(/\t+$/, '');
+      if (line.trim()) out.push(line);
+    }
+    r.forEach((c, j) => {
+      if (!c || (c.rs || 1) <= 1 || cellText(c).trim() === '') return;
+      for (let k = j; k < Math.min(width, j + (c.cs || 1)); k++) cover[k] = Math.max(cover[k] ?? -1, ri + c.rs - 1);
+    });
+  });
   return out;
 }
 
@@ -206,7 +230,7 @@ export function renderTable(b, opts) {
   const rows = b.rows.map((r) => r.map((c) => (c ? { ...c, s: softText(c.s, opts) } : c)));
   if (opts.table === 'grid') return tableGrid(rows);
   if (opts.table === 'lines') return tableLines(rows);
-  return tableTab(rows);
+  return tableTab(rows, !!b.sheet);
 }
 
 // 문서 모델 → 글
