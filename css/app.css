@@ -138,6 +138,7 @@ body[data-mode="merge"] .file::before { counter-increment: n; content: counter(n
 .badge.k-xls { background: #e5f5ec; color: #1d7a45; }
 .badge.k-ppt { background: #fdeee6; color: #c2531b; }
 .badge.k-img { background: #f2ecfd; color: #7243c9; }
+.badge.k-epub { background: #e2f5f3; color: #0f766e; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge { filter: saturate(.8) brightness(.9); } }
 .file .nm { min-width: 0; flex: 1; }
 .file .open, .file .remove { flex: none; }

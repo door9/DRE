@@ -4,7 +4,7 @@ import { makeItem, addItems, updateItem, store, emit } from './store.js';
 import { runJob } from './jobs.js';
 import { extOf, toast } from './util.js';
 
-export const ACCEPT_EXT = new Set(['hwp', 'hwpx', 'hwt', 'doc', 'docx', 'docm', 'rtf', 'odt', 'pdf', 'xls', 'xlsx', 'xlsm', 'ods', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'odp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']);
+export const ACCEPT_EXT = new Set(['hwp', 'hwpx', 'hwt', 'doc', 'docx', 'docm', 'rtf', 'odt', 'pdf', 'xls', 'xlsx', 'xlsm', 'ods', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'odp', 'epub', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']);
 const EXT_KIND = { jpeg: 'jpg', hwt: 'hwp', docm: 'docx', xlsm: 'xlsx', pptm: 'pptx', ppsx: 'pptx', pps: 'ppt' };
 const MAX_FILES = 500;
 
@@ -58,7 +58,7 @@ export async function pickFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         id: 'dre-open', multiple: true,
-        types: [{ description: '문서', accept: { 'application/octet-stream': ['.hwp', '.hwpx', '.doc', '.docx', '.docm', '.pdf', '.rtf', '.odt', '.xls', '.xlsx', '.xlsm', '.ods', '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'] } }],
+        types: [{ description: '문서', accept: { 'application/octet-stream': ['.hwp', '.hwpx', '.doc', '.docx', '.docm', '.pdf', '.rtf', '.odt', '.xls', '.xlsx', '.xlsm', '.ods', '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp', '.epub', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'] } }],
       });
       const entries = [];
       for (const h of handles) entries.push({ file: await h.getFile(), handle: h });

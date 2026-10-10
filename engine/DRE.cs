@@ -896,7 +896,8 @@ namespace Dre
         {
             var c = Program.Conv;
             return "{\"app\":\"DRE\",\"version\":\"" + Program.Version + "\",\"port\":" + Port +
-                ",\"apps\":{\"hwp\":" + B(c.Has("hwp")) + ",\"word\":" + B(c.Has("word")) + ",\"excel\":" + B(c.Has("excel")) + ",\"powerpoint\":" + B(c.Has("powerpoint")) + "}" +
+                ",\"apps\":{\"hwp\":" + B(c.Has("hwp")) + ",\"word\":" + B(c.Has("word")) + ",\"excel\":" + B(c.Has("excel")) + ",\"powerpoint\":" + B(c.Has("powerpoint")) +
+                ",\"browser\":" + B(c.Has("browser")) + "}" + ",\"browserName\":\"" + Json(c.Has("browser") ? Browser.Name : "") + "\"" +
                 ",\"busy\":" + B(c.Busy) + ",\"queue\":" + c.QueueLength + "}";
         }
         static string B(bool b) { return b ? "true" : "false"; }
@@ -1208,6 +1209,7 @@ namespace Dre
             sessions["excel"] = new Session("excel", "Excel.Application", "EXCEL");
             sessions["powerpoint"] = new Session("powerpoint", "PowerPoint.Application", "POWERPNT");
             foreach (var k in sessions.Keys) installed[k] = Type.GetTypeFromProgID(sessions[k].ProgId) != null;
+            installed["browser"] = Browser.Exe != null; // 전자책(EPUB)을 앱이 HTML 로 묶어 보내면 엣지(없으면 크롬)로 인쇄
         }
 
         public bool Has(string kind) { bool b; return installed.TryGetValue(kind, out b) && b; }
@@ -1218,6 +1220,7 @@ namespace Dre
         {
             var parts = new List<string>();
             foreach (var k in new[] { "hwp", "word", "excel", "powerpoint" }) if (Has(k)) parts.Add(Session.AppName(k));
+            if (Has("browser")) parts.Add(Browser.Name + "(전자책)");
             return parts.Count == 0 ? "쓸 수 있는 오피스 프로그램 없음" : string.Join("·", parts.ToArray()) + " 사용 가능";
         }
 
@@ -1225,6 +1228,7 @@ namespace Dre
         static readonly string[] WordExt = { "doc", "docx", "docm", "dot", "dotx", "dotm", "rtf", "odt" };
         static readonly string[] ExcelExt = { "xls", "xlsx", "xlsm", "xlsb", "ods", "csv" };
         static readonly string[] PptExt = { "ppt", "pptx", "pptm", "pps", "ppsx", "odp" };
+        static readonly string[] HtmlExt = { "html", "htm" };
 
         // 이 확장자를 어느 프로그램이 맡을지(워드가 없으면 한글이 워드 문서도 연다)
         string Pick(string ext)
@@ -1233,6 +1237,7 @@ namespace Dre
             if (Array.IndexOf(WordExt, ext) >= 0) return Has("word") ? "word" : Has("hwp") && ext != "odt" ? "hwp" : null;
             if (Array.IndexOf(ExcelExt, ext) >= 0) return Has("excel") ? "excel" : null;
             if (Array.IndexOf(PptExt, ext) >= 0) return Has("powerpoint") ? "powerpoint" : null;
+            if (Array.IndexOf(HtmlExt, ext) >= 0) return Has("browser") ? "browser" : null;
             return null;
         }
 
@@ -1246,8 +1251,10 @@ namespace Dre
                 if (Array.IndexOf(WordExt, ext) >= 0) return "워드(또는 한글) 프로그램이 없어 워드 문서를 바꿀 수 없습니다";
                 if (Array.IndexOf(ExcelExt, ext) >= 0) return "엑셀 프로그램이 없습니다";
                 if (Array.IndexOf(PptExt, ext) >= 0) return "파워포인트 프로그램이 없습니다";
+                if (Array.IndexOf(HtmlExt, ext) >= 0) return "엣지·크롬이 없어 전자책을 PDF로 바꿀 수 없습니다";
                 return "DRE가 다룰 수 없는 파일 형식입니다(." + ext + ")";
             }
+            if (app == "browser" && to != "pdf") return "전자책은 PDF로만 바꿀 수 있습니다";
             if (to == "hwpx" && app != "hwp") return "HWPX로는 한글 문서만 바꿀 수 있습니다";
             if (to == "docx" && app != "word") return "DOCX로는 워드 문서만 바꿀 수 있습니다";
             if (to == "txt" && app != "hwp" && app != "word") return "글자 파일로는 한글·워드 문서만 바꿀 수 있습니다";
@@ -1305,6 +1312,7 @@ namespace Dre
         {
             var c = current;
             if (c == null || c.UsedApp == null) return;
+            if (c.UsedApp == "browser") { Browser.KillTree(browserProc); return; }
             Session s;
             if (sessions.TryGetValue(c.UsedApp, out s)) s.Kill();
         }
@@ -1405,6 +1413,16 @@ namespace Dre
                 string kind = Pick(j.Ext);
                 if (kind == null) throw new ConvertError("no_app", "이 파일을 열 프로그램이 없습니다");
                 j.UsedApp = kind;
+                if (kind == "browser")
+                {
+                    // 전자책: 오피스처럼 띄워 두지 않고 일마다 새로 띄웠다 끝낸다
+                    j.Started = DateTime.Now;
+                    RunBrowser(j);
+                    if (j.TimedOut) throw new ConvertError("timeout", "변환이 너무 오래 걸려 멈췄습니다");
+                    if (j.Cancelled) throw new ConvertError("cancelled", "취소했습니다");
+                    if (!File.Exists(j.Dst) || new FileInfo(j.Dst).Length == 0) throw new ConvertError("failed", Browser.Name + "이(가) PDF를 만들지 못했습니다");
+                    return;
+                }
                 var s = sessions[kind];
                 if (!s.Alive) { s.Release(); s.Create(); Prepare(s); }
                 j.Started = DateTime.Now;
@@ -1650,6 +1668,46 @@ namespace Dre
             }
         }
 
+        // 지금 인쇄 중인 브라우저(취소·시간 초과 때 그 묶음만 끈다)
+        volatile Process browserProc;
+
+        // 전자책(EPUB) → PDF: 앱이 장들을 이어 붙인 HTML 한 장(그림·글꼴은 파일 안, 스크립트·밖 연결은 빠짐)을 브라우저로 인쇄한다.
+        // 사용자의 엣지와 섞이지 않게 일마다 새 빈 프로필(임시 폴더)로 화면 없이 띄우고, 인쇄가 끝나면 브라우저가 스스로 끝난다.
+        void RunBrowser(Job j)
+        {
+            string dir = Path.GetDirectoryName(j.Dst);
+            string profile = Path.Combine(dir, "browser-profile");
+            Directory.CreateDirectory(profile);
+            string[] args = {
+                "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-sync",
+                "--disable-background-networking", "--disable-component-update", "--disable-default-apps", "--disable-features=Translate,MediaRouter",
+                "--mute-audio", "--no-pdf-header-footer", "--generate-pdf-document-outline",
+                "--user-data-dir=" + profile, "--print-to-pdf=" + j.Dst, new Uri(j.Src).AbsoluteUri
+            };
+            var psi = new ProcessStartInfo(Browser.Exe, Browser.JoinArgs(args));
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.WindowStyle = ProcessWindowStyle.Hidden;
+            psi.WorkingDirectory = dir;
+            var p = Process.Start(psi);
+            if (p == null) throw new ConvertError("no_app", Browser.Name + "을(를) 띄우지 못했습니다");
+            browserProc = p;
+            try
+            {
+                Log.Write(Browser.Name + " 인쇄 시작 pid=" + p.Id + " " + Path.GetFileName(j.Src));
+                while (!p.WaitForExit(500))
+                {
+                    if (j.Cancelled || j.TimedOut) { Browser.KillTree(p); break; }
+                }
+                p.WaitForExit(5000);
+            }
+            finally
+            {
+                browserProc = null;
+                p.Dispose();
+            }
+        }
+
         // 한동안 일이 없으면 오피스 프로그램을 닫아 메모리를 돌려준다
         void CloseIdle(bool all)
         {
@@ -1733,6 +1791,90 @@ namespace Dre
                     }
                     catch { }
                 });
+            }
+        }
+    }
+
+    // 화면 없이 인쇄할 브라우저: 엣지(윈도우 기본) → 없으면 크롬
+    static class Browser
+    {
+        public static readonly string Exe = Find();
+        public static string Name { get { return Exe != null && Path.GetFileName(Exe).ToLowerInvariant().StartsWith("chrome") ? "크롬" : "엣지"; } }
+
+        static string Find()
+        {
+            foreach (var exe in new[] { "msedge.exe", "chrome.exe" })
+            {
+                foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+                {
+                    foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+                    {
+                        try
+                        {
+                            using (var b = RegistryKey.OpenBaseKey(hive, view))
+                            using (var k = b.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe))
+                            {
+                                var v = k == null ? null : k.GetValue("") as string;
+                                if (!string.IsNullOrEmpty(v)) { v = v.Trim().Trim('"'); if (File.Exists(v)) return v; }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            foreach (var p in new[] {
+                Path.Combine(pf86, @"Microsoft\Edge\Application\msedge.exe"), Path.Combine(pf, @"Microsoft\Edge\Application\msedge.exe"),
+                Path.Combine(pf, @"Google\Chrome\Application\chrome.exe"), Path.Combine(pf86, @"Google\Chrome\Application\chrome.exe"),
+                Path.Combine(local, @"Google\Chrome\Application\chrome.exe") })
+            {
+                try { if (!string.IsNullOrEmpty(p) && File.Exists(p)) return p; } catch { }
+            }
+            return null;
+        }
+
+        // 명령줄 인자 묶기(빈칸·따옴표가 있으면 따옴표로 — 윈도우 규칙)
+        public static string JoinArgs(string[] args)
+        {
+            var sb = new StringBuilder();
+            foreach (var a in args)
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                if (a.Length > 0 && a.IndexOfAny(new[] { ' ', '\t', '"' }) < 0) { sb.Append(a); continue; }
+                sb.Append('"');
+                int bs = 0;
+                foreach (char ch in a)
+                {
+                    if (ch == '\\') { bs++; continue; }
+                    if (ch == '"') { sb.Append('\\', bs * 2 + 1); sb.Append('"'); bs = 0; continue; }
+                    if (bs > 0) { sb.Append('\\', bs); bs = 0; }
+                    sb.Append(ch);
+                }
+                if (bs > 0) sb.Append('\\', bs * 2);
+                sb.Append('"');
+            }
+            return sb.ToString();
+        }
+
+        // 우리가 띄운 브라우저와 그 아래 프로세스만 끈다(사용자가 쓰는 엣지는 건드리지 않는다)
+        public static void KillTree(Process p)
+        {
+            if (p == null) return;
+            int pid;
+            try { if (p.HasExited) return; pid = p.Id; } catch { return; }
+            try
+            {
+                var psi = new ProcessStartInfo("taskkill", "/PID " + pid + " /T /F");
+                psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.WindowStyle = ProcessWindowStyle.Hidden;
+                using (var k = Process.Start(psi)) { if (k != null) k.WaitForExit(10000); }
+                Log.Write("브라우저 끔 pid=" + pid);
+            }
+            catch (Exception e)
+            {
+                Log.Write("브라우저 끄기 실패 " + e.Message);
+                try { p.Kill(); } catch { }
             }
         }
     }

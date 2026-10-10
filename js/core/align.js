@@ -1,15 +1,20 @@
 // 쪽 맞춤 — 한글·워드 문서를 직접 읽은 모델(구조가 정확)의 쪽 번호를, DRE.exe가 만든 PDF(쪽이 정확)의 쪽마다 글과 대조해 맞춘다.
 // 문단 글의 앞부분을 PDF 글 흐름에서 앞으로만 찾아 나가고, 쪽 경계를 넘는 문단은 그 자리에서 나눈다.
 
-const SQUASH = /[\s\u3000\u200b\u2028\ue000-\uf8ff\u00ad]/;
+// 견줄 때 빼는 글자: 공백·보이지 않는 글자, 그리고 괄호·대괄호·글머리표(•) — 뽑은 글에는 '(원어)'·'[1]' 처럼 붙인 것이 있고
+// PDF 에는 없을 수 있다(전자책 원어 위첨자·각주 번호). 양쪽 다 같이 빼므로 맞춤에는 해가 없다
+const SQUASH = /[\s\u3000\u200b\u2028\ue000-\uf8ff\u00ad()[\]\uff08\uff09\uff3b\uff3d\u2022]/;
+// 첨자 숫자(², ₂)는 보통 숫자로 — PDF 에는 보통 숫자로 찍힌다
+const SCRIPT_DIGIT = '0123456789'.split('').reduce((m, d, i) => { m[String.fromCharCode([0x2070, 0xb9, 0xb2, 0xb3, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079][i])] = d; m[String.fromCharCode(0x2080 + i)] = d; return m; }, {});
 
 // 공백·보이지 않는 글자를 뺀 글과, 그 글자마다 원래 위치
 function squashMap(s) {
   let out = '';
   const idx = [];
   for (let i = 0; i < s.length; i++) {
-    if (SQUASH.test(s[i])) continue;
-    out += s[i];
+    const ch = s[i];
+    if (SQUASH.test(ch)) continue;
+    out += SCRIPT_DIGIT[ch] || ch;
     idx.push(i);
   }
   return { sq: out, idx };
@@ -27,12 +32,21 @@ export function alignPages(doc, texts) {
   };
   let ptr = 0;
   let matched = 0, total = 0;
+  // 문단 첫머리를 PDF 글 흐름에서 앞으로 찾는다. 짧은 조각일수록 가까운 곳에서만 받아들인다 — 짧은 조각이 한참 뒤 엉뚱한 곳에 걸리면
+  // 자리가 거기로 뛰어 그 뒤 문단을 하나도 못 찾는다(큰 문서에서 실측: 한글 027번 1%, 전자책 4%).
+  // 긴 조각은 조금 앞질렀을 때를 위해 자리보다 조금 앞에서부터도 찾는다
+  const WINDOW = { 16: 60000, 8: 6000, 5: 1500 };
   const find = (sq) => {
     for (const n of [16, 8, 5]) {
       if (sq.length < Math.min(n, 3)) continue;
       const key = sq.slice(0, Math.min(n, sq.length));
+      const win = key.length >= 12 ? WINDOW[16] : key.length >= 7 ? WINDOW[8] : WINDOW[5];
       const pos = stream.indexOf(key, ptr);
-      if (pos >= 0 && pos - ptr < 60000) return pos;
+      if (pos >= 0 && pos - ptr < win) return pos;
+      if (key.length >= 12) {
+        const back = stream.indexOf(key, Math.max(0, ptr - 5000));
+        if (back >= 0 && back < ptr) return back;
+      }
     }
     return -1;
   };
@@ -76,8 +90,8 @@ export function alignPages(doc, texts) {
     }
     segs.push({ s: full.slice(prev), pg: pageAt(pos + (cuts.length ? cuts[cuts.length - 1] : 0)) });
     out.push({ ...b, segs: segs.filter((s) => s.s), joins: 'G'.repeat(Math.max(0, segs.filter((s) => s.s).length - 1)) });
-    // 다음 찾기는 이 문단 끝에서(PDF 쪽에 자동 번호·쪽 번호가 끼어 있을 수 있어 조금 앞에서)
-    ptr = Math.max(ptr, pos + Math.max(1, sq.length - 2));
+    // 다음 찾기는 이 문단 끝 조금 앞에서(뽑은 글과 PDF 글의 길이가 조금 다를 수 있다 — 쪽 번호·자동 번호·각주 표시)
+    ptr = Math.max(ptr, pos + Math.max(1, Math.floor(sq.length * 0.85)));
   }
   doc.blocks = out;
   doc.pages = texts.length;

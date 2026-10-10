@@ -37,16 +37,17 @@ export function openEngineDialog() {
     kv.innerHTML = '';
     kv.append(h('dt', { text: '상태' }), h('dd', { text: engineStatusText() }));
     if (engine.status === 'on') {
-      const apps = Object.entries(engine.apps || {}).filter(([, v]) => v).map(([k]) => APP_NAMES[k] || k);
+      const apps = Object.entries(engine.apps || {}).filter(([, v]) => v).map(([k]) => (k === 'browser' ? `${engine.browserName || '엣지'}(전자책)` : APP_NAMES[k] || k));
       kv.append(h('dt', { text: '쓸 수 있는 프로그램' }), h('dd', { text: apps.length ? apps.join(', ') : '없음' }));
     }
   };
   fill();
   const off = onEngine(fill);
   const body = h('div.dlg-body', { 'data-info-host': '' },
-    h('p', { style: 'margin-top:0' }, '한글·워드·엑셀·파워포인트 문서를 PDF로 바꿀 때는 이 PC에 깔린 프로그램을 씁니다. 그 다리 역할을 하는 작은 프로그램이 이 PC에 설치하는 ', h('b', { text: 'DRE' }), '입니다. ', infoToggle(
+    h('p', { style: 'margin-top:0' }, '한글·워드·엑셀·파워포인트 문서와 전자책(EPUB)을 PDF로 바꿀 때는 이 PC에 깔린 프로그램을 씁니다. 그 다리 역할을 하는 작은 프로그램이 이 PC에 설치하는 ', h('b', { text: 'DRE' }), '입니다. ', infoToggle(
       `<p>원본과 똑같은 모양의 PDF를 만들려면 문서를 만든 프로그램(한글·워드)이 직접 그려야 합니다. 브라우저만으로는 한글 문서를 정확히 그릴 수 없어서, DRE는 이 PC의 프로그램을 숨긴 채 불러 PDF를 만듭니다.</p>
        <p>이 프로그램은 이 PC 안(127.0.0.1)에서만 듣고, DRE 앱에서 온 요청만 받습니다. 쉴 때는 메모리를 거의 쓰지 않고, 일이 끝나면 한글·워드를 1분 안에 닫습니다. 30분 동안 일이 없으면 스스로 꺼집니다(알림 영역 아이콘 메뉴에서 바꿀 수 있음).</p>
+       <p>전자책(EPUB)은 앱이 장들을 웹 문서 한 장으로 묶어 보내면(스크립트·인터넷 연결은 빼고), DRE가 이 PC의 엣지를 화면 없이 띄워 PDF로 인쇄합니다. 쓰고 있는 엣지와는 따로 띄웠다가 끝나면 닫습니다.</p>
        <p>글 뽑기(TXT)와 PDF 합치기·쪽 뽑기는 이 프로그램 없이도 됩니다. 이 프로그램이 필요한 것은 한글·워드 등을 PDF로 바꿀 때뿐입니다.</p>
        <p>크롬이 '이 기기의 다른 앱과 서비스에 접근'을 물으면 <b>허용</b>을 눌러야 앱이 이 프로그램과 이야기할 수 있습니다(한 번만). 처음 켤 때 크롬이 프로그램을 열지 물으면 '항상 허용'에 표시해 두면 다음부터 묻지 않습니다.</p>`)),
     kv,

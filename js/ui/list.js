@@ -14,6 +14,7 @@ function kindClass(kind) {
   if (kind.startsWith('xl') || kind === 'ods') return 'k-xls';
   if (kind.startsWith('pp') || kind === 'odp') return 'k-ppt';
   if (IMAGES.has(kind)) return 'k-img';
+  if (kind === 'epub') return 'k-epub';
   return '';
 }
 

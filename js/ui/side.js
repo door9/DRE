@@ -3,7 +3,7 @@ import { store, on, selectedItem, updateItem, emit } from '../store.js';
 import { settings, saveSettings, renderOptions } from '../settings.js';
 import { h, ico, esc, fmtNum, infoToggle, toast, debounce, baseName } from '../util.js';
 import { parseRange, formatRange, render } from '../core/model.js';
-import { IMAGES, OFFICE, SHEETS, SLIDES, kindLabel } from '../core/detect.js';
+import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, kindLabel } from '../core/detect.js';
 import { ensurePdf, ensureText } from '../produce.js';
 import { openThumbDoc, renderThumb } from '../thumbs.js';
 import { engine, engineReady, launchEngine, onEngine } from '../engine.js';
@@ -107,7 +107,7 @@ function rangeSection(it, { open = true } = {}) {
     let src = null;
     if (it.kind === 'pdf') src = it.file;
     else if (it.pdf) src = it.pdf;
-    else if (OFFICE.has(it.kind)) {
+    else if (ENGINE_PDF.has(it.kind)) {
       if (!engineReady()) {
         note.innerHTML = '';
         note.append(
@@ -321,8 +321,8 @@ export function renderSide() {
   }
   if (!it) {
     box.append(h('div.side-note', { html: mode === 'pdf'
-      ? '한글·워드·엑셀·파워포인트 문서와 그림을 PDF로 바꿉니다.<br>파일을 넣고 고르면 쪽을 골라 바꿀 수 있습니다.'
-      : 'PDF·한글·워드·엑셀·파워포인트 문서와 그림의 글을 TXT로 뽑습니다.<br>파일을 고르면 여기에 뽑은 글이 보입니다.' }));
+      ? '한글·워드·엑셀·파워포인트 문서와 전자책(EPUB)·그림을 PDF로 바꿉니다.<br>파일을 넣고 고르면 쪽을 골라 바꿀 수 있습니다.'
+      : 'PDF·한글·워드·엑셀·파워포인트 문서와 전자책(EPUB)·그림의 글을 TXT로 뽑습니다.<br>파일을 고르면 여기에 뽑은 글이 보입니다.' }));
     return;
   }
   box.append(h('div.side-head', {}, h('h2', { text: it.name, title: it.name })));
@@ -375,7 +375,7 @@ export function setupSide() {
   onEngine(() => {
     // DRE.exe가 켜지면 쪽 그림을 다시 시도
     const it = current;
-    if (it && engineReady() && OFFICE.has(it.kind) && !it.pdf && !thumbState) {
+    if (it && engineReady() && ENGINE_PDF.has(it.kind) && !it.pdf && !thumbState) {
       const sec = side().querySelector('.range-sec');
       if (sec && sec.reloadThumbs) sec.reloadThumbs();
     }

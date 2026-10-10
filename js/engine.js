@@ -1,4 +1,4 @@
-// PC의 DRE 부르기 — 이 PC에 설치된 작은 프로그램(DRE.exe)이 한글·워드·엑셀·파워포인트로 PDF를 만든다.
+// PC의 DRE 부르기 — 이 PC에 설치된 작은 프로그램(DRE.exe)이 한글·워드·엑셀·파워포인트로(전자책은 엣지로) PDF를 만든다.
 // DRE.exe는 127.0.0.1(이 PC 안)에서만 듣는다. 꺼져 있으면 'dre://' 주소로 켤 수 있다(크롬이 한 번 물어봄).
 import { local, sleep } from './util.js';
 
@@ -7,7 +7,7 @@ const PORTS = [41730, 41731, 41732];
 export const SERVED_BY_ENGINE = ['127.0.0.1', 'localhost'].includes(location.hostname) && PORTS.includes(+location.port);
 const hostFor = (port) => (SERVED_BY_ENGINE && +location.port === port ? location.origin : `http://127.0.0.1:${port}`);
 const listeners = new Set();
-export const engine = { status: 'checking', port: null, apps: {}, version: null, busy: false };
+export const engine = { status: 'checking', port: null, apps: {}, browserName: '', version: null, busy: false };
 
 function set(patch) {
   Object.assign(engine, patch);
@@ -34,7 +34,7 @@ export function checkEngine({ quiet = false } = {}) {
       try {
         const j = await ping(p);
         local.set('engineSeen', true);
-        set({ status: 'on', port: p, apps: j.apps || {}, version: j.version, busy: !!j.busy });
+        set({ status: 'on', port: p, apps: j.apps || {}, browserName: j.browserName || '', version: j.version, busy: !!j.busy });
         return true;
       } catch { /* 다음 자리 */ }
     }
@@ -72,6 +72,7 @@ export function engineCan(kind) {
   if (kind === 'odt') return !!a.word;
   if (['xls', 'xlsx', 'ods'].includes(kind)) return !!a.excel;
   if (['ppt', 'pptx', 'odp'].includes(kind)) return !!a.powerpoint;
+  if (kind === 'epub') return !!a.browser; // 전자책: 앱이 HTML 로 묶어 보내면 엣지(없으면 크롬)로 인쇄
   return false;
 }
 

@@ -7,7 +7,7 @@ const ascii = (u8, from, len) => String.fromCharCode(...u8.subarray(from, from +
 
 export const IMAGE_MIME = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp' };
 
-// 돌려주는 것: 'pdf' | 'hwp' | 'hwp3' | 'hwpx' | 'doc' | 'docx' | 'rtf' | 'odt' | 'xls' | 'xlsx' | 'ods' | 'ppt' | 'pptx' | 'odp' |
+// 돌려주는 것: 'pdf' | 'hwp' | 'hwp3' | 'hwpx' | 'doc' | 'docx' | 'rtf' | 'odt' | 'xls' | 'xlsx' | 'ods' | 'ppt' | 'pptx' | 'odp' | 'epub' |
 //              'jpg' | 'png' | 'gif' | 'bmp' | 'webp' | 'unknown'
 export function detectKind(u8, name = '') {
   const ext = (name.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
@@ -36,16 +36,20 @@ export function detectKind(u8, name = '') {
   }
   if (startsWith(u8, [0x50, 0x4b, 0x03, 0x04])) {
     const names = [];
+    let mimetype = '';
     try {
-      unzipSync(u8, { filter: (f) => { names.push(f.name); return f.name === 'mimetype'; } });
+      const got = unzipSync(u8, { filter: (f) => { names.push(f.name); return f.name === 'mimetype'; } });
+      if (got.mimetype) mimetype = String.fromCharCode(...got.mimetype.subarray(0, 64)).trim();
     } catch { /* 이름만 모았으면 됨 */ }
     const has = (n) => names.includes(n);
+    // 전자책(EPUB): META-INF/container.xml 이 있고 mimetype 이 application/epub+zip(또는 이름이 .epub)
+    if (has('META-INF/container.xml') && (mimetype === 'application/epub+zip' || ext === 'epub' || names.some((n) => /\.opf$/i.test(n)))) return 'epub';
     if (has('Contents/content.hpf') || names.some((n) => /^Contents\/section\d+\.xml$/i.test(n))) return 'hwpx';
     if (has('word/document.xml') || names.some((n) => /^word\/document\d*\.xml$/.test(n))) return 'docx';
     if (has('xl/workbook.xml')) return 'xlsx';
     if (has('ppt/presentation.xml')) return 'pptx';
     if (has('content.xml')) return ext === 'ods' ? 'ods' : ext === 'odp' ? 'odp' : 'odt';
-    return { hwpx: 'hwpx', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx' }[ext] || 'unknown';
+    return { hwpx: 'hwpx', docx: 'docx', xlsx: 'xlsx', pptx: 'pptx', epub: 'epub' }[ext] || 'unknown';
   }
   // 이름은 엑셀(.xls)인데 속은 웹 페이지 표나 엑셀 2003 XML 인 것(공공기관·거래소 내려받기에 흔하다) — 엑셀 문서로 다룬다
   if (ext === 'xls' && (/<(?:!doctype\s+html|html|table|head|body)\b/i.test(head) || /urn:schemas-microsoft-com:office:spreadsheet/.test(head))) return 'xls';
@@ -55,21 +59,23 @@ export function detectKind(u8, name = '') {
 // 형식 묶음
 export const OFFICE = new Set(['hwp', 'hwp3', 'hwpx', 'doc', 'docx', 'rtf', 'odt', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp']);
 // 앱이 직접 글을 뽑을 수 있는 것(그림은 문자 인식으로 따로). 옛 한글(hwp3)·배포용 한글은 DRE.exe 를 거친다
-export const TEXTABLE = new Set(['pdf', 'hwp', 'hwpx', 'doc', 'docx', 'rtf', 'odt', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp']);
+export const TEXTABLE = new Set(['pdf', 'hwp', 'hwpx', 'doc', 'docx', 'rtf', 'odt', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp', 'epub']);
+// PDF 로 바꿀 때 DRE.exe 가 필요한 것: 오피스 문서(한글·워드·엑셀·파워포인트로) + 전자책(앱이 HTML 로 묶어 엣지로 인쇄)
+export const ENGINE_PDF = new Set([...OFFICE, 'epub']);
 export const SHEETS = new Set(['xls', 'xlsx', 'ods']);   // 시트 하나 = 한 쪽(어림)
 export const SLIDES = new Set(['ppt', 'pptx', 'odp']);   // 슬라이드 하나 = 한 쪽(정확)
 export const IMAGES = new Set(['jpg', 'png', 'gif', 'bmp', 'webp']);
 
 // DRE.exe(한글·워드…)에게 보낼 때 쓸 확장자
 export function engineExt(kind) {
-  return { hwp3: 'hwp' }[kind] || kind;
+  return { hwp3: 'hwp', epub: 'html' }[kind] || kind;
 }
 
 // 화면에 보일 형식 이름
 export function kindLabel(kind) {
   return {
     pdf: 'PDF', hwp: '한글', hwp3: '한글', hwpx: '한글', doc: '워드', docx: '워드', rtf: 'RTF', odt: 'ODT',
-    xls: '엑셀', xlsx: '엑셀', ods: 'ODS', ppt: 'PPT', pptx: 'PPT', odp: 'ODP',
+    xls: '엑셀', xlsx: '엑셀', ods: 'ODS', ppt: 'PPT', pptx: 'PPT', odp: 'ODP', epub: 'EPUB',
     jpg: '그림', png: '그림', gif: '그림', bmp: '그림', webp: '그림', unknown: '?',
   }[kind] || '?';
 }

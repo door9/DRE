@@ -1,8 +1,8 @@
 // 항목마다 필요한 것 만들기 — PDF(DRE.exe·그림), 뽑은 글(문서 모델). 한 번 만든 것은 다시 쓴다.
 import { runJob } from './jobs.js';
-import { engineConvert, engineReady, engineCan, checkEngine } from './engine.js';
+import { engine, engineConvert, engineReady, engineCan, checkEngine } from './engine.js';
 import { updateItem } from './store.js';
-import { OFFICE, IMAGES, TEXTABLE, SHEETS, SLIDES, engineExt } from './core/detect.js';
+import { OFFICE, IMAGES, TEXTABLE, SHEETS, SLIDES, ENGINE_PDF, engineExt } from './core/detect.js';
 import { baseName, extOf } from './util.js';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -15,9 +15,9 @@ function engineTask(fn) {
   return p;
 }
 
-// PDF로 바꿀 때 DRE.exe가 필요한가
+// PDF로 바꿀 때 DRE.exe가 필요한가(오피스 문서·전자책)
 export function needsEngine(it) {
-  return OFFICE.has(it.kind);
+  return ENGINE_PDF.has(it.kind);
 }
 
 // 글을 뽑을 때 DRE.exe를 쓰는가: 앱이 직접 못 읽는 것(옛 한글·배포용 한글), 그리고 쪽을 고른 문서(실제 쪽에 맞추려고 — 없으면 어림)
@@ -45,16 +45,27 @@ export async function ensurePdf(it, { signal, onState } = {}) {
     updateItem(it, { pdf: r.blob, pdfPages: 1 });
     return r.blob;
   }
-  if (!OFFICE.has(it.kind)) throw fail('unsupported', '이 형식은 PDF로 바꿀 수 없습니다');
+  if (!ENGINE_PDF.has(it.kind)) throw fail('unsupported', '이 형식은 PDF로 바꿀 수 없습니다');
+  const ebook = it.kind === 'epub';
   if (!engineReady()) await checkEngine({ quiet: true });
-  if (!engineReady()) throw fail('engine_off', '한글·워드 문서를 PDF로 바꾸려면 DRE가 켜져 있어야 합니다');
-  if (!engineCan(it.kind)) throw fail('no_app', '이 PC에 이 문서를 열 프로그램이 없습니다');
+  if (!engineReady()) throw fail('engine_off', ebook ? '전자책을 PDF로 바꾸려면 DRE가 켜져 있어야 합니다' : '한글·워드 문서를 PDF로 바꾸려면 DRE가 켜져 있어야 합니다');
+  // 전자책 인쇄는 새 판 DRE 부터(옛 판은 상태에 browser 가 없다)
+  if (ebook && !('browser' in (engine.apps || {}))) throw fail('engine_old', '설치된 DRE가 옛 판이라 전자책을 PDF로 바꿀 수 없습니다. DRE를 새로 내려받아 설치해 주세요');
+  if (!engineCan(it.kind)) throw fail('no_app', ebook ? '이 PC에 엣지·크롬이 없어 전자책을 PDF로 바꿀 수 없습니다' : '이 PC에 이 문서를 열 프로그램이 없습니다');
   if (onState) onState('engine-wait');
   return engineTask(async () => {
     if (signal && signal.aborted) throw fail('cancelled', '취소했습니다');
     if (it.pdf) return it.pdf;
+    let src = it.file;
+    if (ebook) {
+      // 전자책: 장들을 HTML 한 장으로 묶는다(그림·글꼴은 안에, 스크립트·밖 연결은 빼고 — 작업 일꾼)
+      if (onState) onState('pack');
+      src = (await runWorker('epubhtml', { file: it.file }, signal)).blob;
+    }
     if (onState) onState('engine');
-    const pdf = await engineConvert(it.file, engineName(it), 'pdf', { signal });
+    let pdf = await engineConvert(src, engineName(it), 'pdf', { signal });
+    // 엣지가 만든 PDF 의 글자 대응표 바로잡기(일부 글꼴의 빈칸이 제어 문자로, 한자가 강희 부수로 적히는 것)
+    if (ebook) pdf = (await runWorker('pdffix', { file: pdf }, signal)).blob;
     updateItem(it, { pdf });
     return pdf;
   });
@@ -138,6 +149,12 @@ export async function ensureText(it, { range = null, signal, onProgress, onState
   }
   updateItem(it, { textDoc: doc, textKey: key });
   return doc;
+}
+
+function runWorker(type, payload, signal) {
+  const job = runJob(type, payload);
+  if (signal) signal.addEventListener('abort', () => job.cancel(), { once: true });
+  return job.promise;
 }
 
 function runExtract(payload, { onProgress, signal }) {

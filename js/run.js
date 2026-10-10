@@ -5,8 +5,8 @@ import { ensurePdf, ensureText, needsEngine, textNeedsEngine } from './produce.j
 import { runJob, cancelAll } from './jobs.js';
 import { prepareSave, saveOutput, textBlob } from './save.js';
 import { render, formatRange } from './core/model.js';
-import { engineReady, launchEngine, engineCan } from './engine.js';
-import { OFFICE, IMAGES, TEXTABLE } from './core/detect.js';
+import { engine, engineReady, launchEngine, engineCan } from './engine.js';
+import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF } from './core/detect.js';
 import { baseName, toast } from './util.js';
 
 let abort = null;
@@ -85,7 +85,7 @@ async function runInner(mode, items) {
       // 글 뽑기에서 DRE가 꼭 있어야 하는 것은 옛 한글·배포용 한글뿐(나머지는 쪽을 어림해 직접 뽑는다)
       const hard = mode !== 'text' || items.some((it) => (OFFICE.has(it.kind) && !TEXTABLE.has(it.kind)) || it.probeError === 'distribution');
       if (hard) {
-        toast(mode === 'text' ? 'DRE를 켜지 못해 옛 한글·배포용 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.', { bad: true, ms: 6000 });
+        toast(mode === 'text' ? 'DRE를 켜지 못해 옛 한글·배포용 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드·전자책 문서는 건너뜁니다.', { bad: true, ms: 6000 });
         import('./ui/dialogs.js').then((m) => m.openEngineDialog());
       } else toast('DRE를 켜지 못해 쪽 나눔은 문서 안 정보로 어림합니다.', { ms: 5000 });
     }
@@ -148,7 +148,8 @@ export function stopAll() {
 
 async function convertOne(it, session) {
   const signal = abort.signal;
-  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' ? (it.kind.startsWith('hwp') ? '한글로 PDF 만드는 중' : '프로그램으로 PDF 만드는 중') : '' });
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'pack' ? '전자책 묶는 중'
+    : s === 'engine' ? (it.kind.startsWith('hwp') ? '한글로 PDF 만드는 중' : it.kind === 'epub' ? `${engine.browserName || '엣지'}로 PDF 만드는 중` : '프로그램으로 PDF 만드는 중') : '' });
   let pdf = await ensurePdf(it, { signal, onState });
   let name = `${baseName(it.name)}.pdf`;
   if (it.range) {
@@ -164,7 +165,7 @@ async function convertOne(it, session) {
 
 async function textOne(it, session) {
   const signal = abort.signal;
-  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' ? '쪽 맞추려고 PDF 만드는 중' : s === 'ocr' ? '문자 인식 중' : '글 뽑는 중' });
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' || s === 'pack' ? '쪽 맞추려고 PDF 만드는 중' : s === 'ocr' ? '문자 인식 중' : '글 뽑는 중' });
   const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v, note) => updateItem(it, note === 'ocr' ? { progress: v, msg: '문자 인식 중' } : { progress: v }) });
   const text = render(doc, renderOptions(), it.range ? new Set(it.range) : null);
   const blob = textBlob(text, { bom: settings.bom });
@@ -181,12 +182,12 @@ async function mergeAll(items, session) {
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (signal.aborted) return null;
-    updateItem(it, { state: 'working', msg: OFFICE.has(it.kind) ? '' : '준비' });
+    updateItem(it, { state: 'working', msg: ENGINE_PDF.has(it.kind) ? '' : '준비' });
     setStatus(`${i + 1}/${items.length} 준비 중…`);
     try {
       let file = it.file, kind = it.kind;
-      if (OFFICE.has(it.kind)) {
-        file = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : 'PDF 만드는 중' }) });
+      if (ENGINE_PDF.has(it.kind)) {
+        file = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'pack' ? '전자책 묶는 중' : 'PDF 만드는 중' }) });
         kind = 'pdf';
       } else if (!IMAGES.has(it.kind) && it.kind !== 'pdf') {
         throw Object.assign(new Error('합칠 수 없는 형식입니다'), { code: 'unsupported' });

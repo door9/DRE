@@ -140,6 +140,7 @@ async function parseOffice(kind, bytes, onProgress) {
     case 'pptx': parse = (await import('../core/pptx.js')).parsePptx; break;
     case 'ppt': parse = (await import('../core/ppt.js')).parsePpt; break;
     case 'odt': case 'ods': case 'odp': { const m = await import('../core/odf.js'); parse = (b, o) => m.parseOdf(b, { ...o, kind }); break; }
+    case 'epub': parse = (await import('../core/epub.js')).parseEpub; break;
     default: throw fail('unsupported', '이 형식은 앱이 직접 글을 뽑을 수 없습니다');
   }
   try {
@@ -234,6 +235,29 @@ const handlers = {
     }
     const out = await buildPdf(pdfjs, loadPdfLib, parts, { outline, title, opts: PDF_OPTS, onProgress: (v) => post({ id, type: 'progress', value: v }) });
     return { blob: new Blob([out], { type: 'application/pdf' }) };
+  },
+
+  // 전자책(EPUB) → PDF 로 인쇄할 HTML 한 장(DRE 가 엣지로 인쇄한다)
+  async epubhtml(m) {
+    const { buildEpubHtml } = await import('../core/epubhtml.js');
+    let r;
+    try {
+      r = await buildEpubHtml(await bytesOf(m), { onProgress: (v) => post({ id: m.id, type: 'progress', value: v }) });
+    } catch (e) {
+      if (e && e.code) throw e;
+      console.error('전자책 묶기 오류', e);
+      throw fail('broken', '전자책을 읽지 못했습니다(손상되었거나 특이한 형식일 수 있습니다)');
+    }
+    return { blob: new Blob(r.parts, { type: 'text/html' }), title: r.title };
+  },
+
+  // 엣지가 만든 PDF 의 글자 대응표 바로잡기(빈칸·한자) — 고칠 것이 없으면 받은 그대로
+  async pdffix(m) {
+    const { fixToUnicode } = await import('../core/pdftounicode.js');
+    const bytes = await bytesOf(m);
+    let r;
+    try { r = fixToUnicode(bytes); } catch (e) { console.error('PDF 글자 대응표 바로잡기 오류', e); r = { bytes, fixed: 0 }; }
+    return { blob: r.fixed ? new Blob([r.bytes], { type: 'application/pdf' }) : m.file, fixed: r.fixed };
   },
 
   // 그림 → PDF 한 쪽
