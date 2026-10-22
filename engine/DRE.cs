@@ -16,6 +16,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.IO.Compression;
 using System.Threading;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -170,6 +171,7 @@ namespace Dre
         public int IdleExitMinutes = 30;
         public List<string> ExtraOrigins = new List<string>();
         public string Debug = "";
+        public string ClaudePath = ""; // AI 교정에 쓸 Claude Code 실행 파일(비우면 %USERPROFILE%\.local\bin\claude.exe → PATH 순으로 찾는다)
 
         public static Settings Load(string path)
         {
@@ -190,6 +192,7 @@ namespace Dre
                         else if (k == "idle_exit_minutes") { int n; if (int.TryParse(v, out n)) s.IdleExitMinutes = Math.Max(0, n); }
                         else if (k == "extra_origin" && v.Length > 0) s.ExtraOrigins.Add(v.TrimEnd('/'));
                         else if (k == "debug") s.Debug = v;
+                        else if (k == "claude_path") s.ClaudePath = v.Trim('"');
                     }
                 }
             }
@@ -206,6 +209,7 @@ namespace Dre
                 if (!string.IsNullOrEmpty(AppUrl)) sb.AppendLine("app_url=" + AppUrl);
                 sb.AppendLine("idle_exit_minutes=" + IdleExitMinutes);
                 foreach (var o in ExtraOrigins) sb.AppendLine("extra_origin=" + o);
+                if (!string.IsNullOrEmpty(ClaudePath)) sb.AppendLine("claude_path=" + ClaudePath);
                 File.WriteAllText(Path_, sb.ToString(), new UTF8Encoding(false));
             }
             catch (Exception e) { Log.Write("설정 저장 실패 " + e.Message); }
@@ -808,7 +812,27 @@ namespace Dre
             if (req.Method == "POST" && req.Path == "/v1/cancel")
             {
                 Program.Conv.CancelAll();
+                Ai.CancelAll();
                 SendJson(ns, corsOrigin, 200, "{\"ok\":true}");
+                return;
+            }
+            // AI 교정(문자 인식 결과를 이 PC 의 Claude 로 바로잡기) — 상태·로그인 창·고치기
+            if (req.Method == "GET" && req.Path == "/v1/ai/status")
+            {
+                SendJson(ns, corsOrigin, 200, Ai.Status(req.Q("refresh") == "1"));
+                return;
+            }
+            if (req.Method == "POST" && req.Path == "/v1/ai/login")
+            {
+                Drain(ns, req, ContentLength(req));
+                string lj;
+                int lc = Ai.Login(out lj);
+                SendJson(ns, corsOrigin, lc, lj);
+                return;
+            }
+            if (req.Method == "POST" && req.Path == "/v1/ai")
+            {
+                AiFix(ns, req, corsOrigin);
                 return;
             }
             if (req.Method == "POST" && req.Path == "/v1/convert")
@@ -898,7 +922,7 @@ namespace Dre
             return "{\"app\":\"DRE\",\"version\":\"" + Program.Version + "\",\"port\":" + Port +
                 ",\"apps\":{\"hwp\":" + B(c.Has("hwp")) + ",\"word\":" + B(c.Has("word")) + ",\"excel\":" + B(c.Has("excel")) + ",\"powerpoint\":" + B(c.Has("powerpoint")) +
                 ",\"browser\":" + B(c.Has("browser")) + "}" + ",\"browserName\":\"" + Json(c.Has("browser") ? Browser.Name : "") + "\"" +
-                ",\"busy\":" + B(c.Busy) + ",\"queue\":" + c.QueueLength + "}";
+                ",\"busy\":" + B(c.Busy) + ",\"queue\":" + c.QueueLength + ",\"ai\":" + B(Ai.Exe() != null) + "}";
         }
         static string B(bool b) { return b ? "true" : "false"; }
 
@@ -980,6 +1004,45 @@ namespace Dre
                     }
                 });
             }
+        }
+
+        static long ContentLength(Req req)
+        {
+            long n;
+            return long.TryParse(req.Header("Content-Length") ?? "", out n) && n > 0 ? n : 0;
+        }
+
+        // AI 교정: 본문 = { text: 줄번호 붙은 인식 결과, images: [{ label, type, data(base64) }] }. 지시문·답 꼴은 Ai 가 정한다
+        void AiFix(NetworkStream ns, Req req, string corsOrigin)
+        {
+            long clen = ContentLength(req);
+            if (clen <= 0) { SendJson(ns, corsOrigin, 411, "{\"error\":\"length\",\"message\":\"보낼 글이 없습니다\"}"); return; }
+            if (clen > Ai.MaxBody)
+            {
+                Drain(ns, req, clen);
+                SendJson(ns, corsOrigin, 413, "{\"error\":\"too_large\",\"message\":\"쪽 그림이 너무 큽니다\"}");
+                return;
+            }
+            var body = new byte[clen];
+            int have = (int)Math.Min(clen, req.PreLen);
+            if (have > 0) Buffer.BlockCopy(req.Pre, req.PreOff, body, 0, have);
+            while (have < clen)
+            {
+                int n = ns.Read(body, have, (int)(clen - have));
+                if (n <= 0) return;
+                have += n;
+            }
+            string text, why;
+            var images = new List<string[]>();
+            if (!Ai.ParseRequest(Encoding.UTF8.GetString(body), out text, images, out why))
+            {
+                SendJson(ns, corsOrigin, 400, "{\"error\":\"bad_request\",\"message\":\"" + Json(why) + "\"}");
+                return;
+            }
+            int code;
+            string res = Ai.Fix(text, images, delegate { return ClientGone(ns); }, out code);
+            if (res == null) return; // 앱이 끊었다(사용자가 중지·다른 파일을 고름)
+            SendJson(ns, corsOrigin, code, res);
         }
 
         static bool ClientGone(NetworkStream ns)
@@ -1796,6 +1859,347 @@ namespace Dre
     }
 
     // 화면 없이 인쇄할 브라우저: 엣지(윈도우 기본) → 없으면 크롬
+    // ───────────────────────── AI 교정(Claude) ─────────────────────────
+    // 문자 인식(스캔한 쪽·그림)으로 읽은 글을 이 PC 의 Claude Code(사용자의 Claude 구독으로 로그인)에게 쪽 그림과 함께 보여 바로잡는다.
+    // 2026-10-22 사용자: "추가로 과금되지 않고 내가 사용하고 있는 요금제 내에서 토큰이 사용될 수 있도록" — API 요금 없음, 사용량은 Claude 요금제에서 나간다. 그래서
+    //  - API 키·다른 계정 환경 변수(ANTHROPIC*·CLAUDE*)는 넘기지 않는다(있으면 구독 대신 API 요금으로 갈 수 있다)
+    //  - --bare 는 쓰지 않는다(구독 로그인을 읽지 않고 API 키만 쓴다 — 도움말 실측)
+    //  - 'claude auth status' 로 구독(claude.ai) 로그인인지 확인한 뒤에만 부른다
+    // 안전: 지시문과 답 꼴은 여기서 정한다(앱은 인식한 줄과 쪽 그림만 보낸다) · 도구 없음(--tools "") · 사용자 설정·훅·MCP 안 읽음 ·
+    // 대화 기록 안 남김 · 빈 작업 폴더. 한 번에 3개까지 함께, 앱이 끊거나(중지) 5분을 넘기면 끈다.
+    static class Ai
+    {
+        public const long MaxBody = 64L * 1024 * 1024;
+        const int MaxImages = 8;
+        const int TimeoutMs = 5 * 60 * 1000;
+        // 지시문(web-tests/tools/ai_ocr_vision_try.mjs 로 정답 있는 스캔 16개 문서에 재어 고른 것)
+        static readonly string SystemPrompt = (@"당신은 문자 인식(OCR)으로 읽어 낸 한국어 문서를 원본 쪽 그림과 맞대어 바로잡는 교정자입니다.
+사용자 말에는 '인식 결과'(줄마다 '줄번호: 내용', 내용 안의 탭은 표의 칸 나눔)와 그 문서의 쪽 그림들(쪽마다 위·아래 반쪽)이 있습니다.
+인식 결과에서 그림과 다른 곳을 찾아, 그림에 실제로 보이는 글로 되돌리는 고치기 목록을 답합니다.
+
+고칠 것
+- 잘못 읽은 글자(비슷한 모양의 한글, 로마자·숫자·기호 혼동) — 그림을 보고 확인한 대로
+- 인식기가 뜻 없는 로마자·기호로 읽어 버린 곳 — 그림에서 그 자리의 글을 읽을 수 있으면 그 글로, 그림에서도 글이 아니면(잡티·선·그림 조각) 지웁니다
+- 낱말 안에 잘못 끼어든 빈칸, 그림에서는 띄어 쓴 낱말을 붙여 버린 곳
+- 엉뚱한 줄로 떨어져 나간 따옴표·괄호(그 줄에서 지우고 그림에 있는 자리에 넣음)
+
+지킬 것
+- 고친 글(to)은 반드시 그림에 보이는 글이어야 합니다. 그림에서 확실히 읽을 수 없으면 고치지 않습니다. 짐작으로 채우지 않습니다.
+- 숫자·날짜·금액·전화번호·사람 이름·조항 번호는 그림에서 똑똑히 확인한 것만 고칩니다.
+- 인식 결과에 아예 빠진 줄을 새로 넣지는 않습니다(있는 줄만 고침). 줄 순서·줄 나눔·표의 칸(탭)은 바꾸지 않습니다.
+- 맞춤법·띄어쓰기를 더 좋게 다듬지 않습니다 — 그림과 다른 곳만 고칩니다.
+- from 은 그 줄에 실제로 있는 글을 글자 그대로 옮기되 고칠 곳 앞뒤 몇 글자를 넣어 그 줄에서 한 곳만 가리키게 하고, to 는 그 부분을 바꾼 글입니다.
+- 고칠 곳이 없으면 빈 목록을 답합니다.").Replace("\r\n", "\n");
+        const string Schema = "{\"type\":\"object\",\"properties\":{\"edits\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"integer\"},\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}},\"required\":[\"line\",\"from\",\"to\"],\"additionalProperties\":false}}},\"required\":[\"edits\"],\"additionalProperties\":false}";
+
+        static readonly SemaphoreSlim gate = new SemaphoreSlim(3);
+        static readonly HashSet<Process> running = new HashSet<Process>();
+        static readonly object statusLock = new object();
+        static string statusJson;
+        static DateTime statusUntil;
+
+        static JavaScriptSerializer Ser()
+        {
+            var s = new JavaScriptSerializer();
+            s.MaxJsonLength = int.MaxValue;
+            s.RecursionLimit = 32;
+            return s;
+        }
+
+        // Claude Code 실행 파일: 설정(claude_path) → 공식 설치 자리(%USERPROFILE%\.local\bin) → PATH
+        public static string Exe()
+        {
+            string c = Program.Config.ClaudePath;
+            if (!string.IsNullOrEmpty(c)) return File.Exists(c) ? c : null;
+            try
+            {
+                string p1 = Path.Combine(Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local"), "bin"), "claude.exe");
+                if (File.Exists(p1)) return p1;
+            }
+            catch { }
+            foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
+            {
+                try
+                {
+                    string d = dir.Trim().Trim('"');
+                    if (d.Length == 0) continue;
+                    string q = Path.Combine(d, "claude.exe");
+                    if (File.Exists(q)) return q;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        class RunResult { public string Out = "", Err = ""; public int Code; public bool Gone, TimedOut; }
+
+        static void CleanEnv(ProcessStartInfo psi)
+        {
+            var drop = new List<string>();
+            foreach (string k in psi.EnvironmentVariables.Keys)
+                if (k.StartsWith("ANTHROPIC", StringComparison.OrdinalIgnoreCase) || k.StartsWith("CLAUDE", StringComparison.OrdinalIgnoreCase)) drop.Add(k);
+            foreach (var k in drop) psi.EnvironmentVariables.Remove(k);
+        }
+
+        static string Work()
+        {
+            string w = Path.Combine(Program.TempRoot, "claude");
+            Directory.CreateDirectory(w);
+            return w;
+        }
+
+        static RunResult Run(string exe, string args, string stdin, Func<bool> gone, int timeoutMs)
+        {
+            var r = new RunResult();
+            var psi = new ProcessStartInfo(exe, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.WindowStyle = ProcessWindowStyle.Hidden;
+            psi.RedirectStandardInput = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.StandardOutputEncoding = Encoding.UTF8;
+            psi.StandardErrorEncoding = Encoding.UTF8;
+            psi.WorkingDirectory = Work();
+            CleanEnv(psi);
+            Process p;
+            try { p = Process.Start(psi); }
+            catch (Exception e) { r.Code = -1; r.Err = e.Message; return r; }
+            if (p == null) { r.Code = -1; r.Err = "실행하지 못함"; return r; }
+            lock (running) running.Add(p);
+            var outSb = new StringBuilder();
+            var errSb = new StringBuilder();
+            p.OutputDataReceived += delegate (object s, DataReceivedEventArgs e) { if (e.Data != null) lock (outSb) outSb.Append(e.Data).Append('\n'); };
+            p.ErrorDataReceived += delegate (object s, DataReceivedEventArgs e) { if (e.Data != null) lock (errSb) errSb.Append(e.Data).Append('\n'); };
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
+            try
+            {
+                // 표준 입력은 UTF-8 바이트로(.NET 4 의 StandardInput 글쓰기는 시스템 글자표(CP949)를 쓴다)
+                var b = new UTF8Encoding(false).GetBytes(stdin ?? "");
+                try { p.StandardInput.BaseStream.Write(b, 0, b.Length); p.StandardInput.BaseStream.Flush(); } catch (IOException) { }
+                try { p.StandardInput.Close(); } catch { }
+                var sw = Stopwatch.StartNew();
+                while (!p.WaitForExit(500))
+                {
+                    Program.LastWork = DateTime.Now;
+                    if (gone != null && gone()) { Kill(p); r.Gone = true; break; }
+                    if (sw.ElapsedMilliseconds > timeoutMs) { Kill(p); r.TimedOut = true; break; }
+                }
+                if (p.WaitForExit(10000)) { p.WaitForExit(); r.Code = p.ExitCode; } else r.Code = -1;
+            }
+            finally
+            {
+                lock (running) running.Remove(p);
+                p.Dispose();
+            }
+            lock (outSb) r.Out = outSb.ToString();
+            lock (errSb) r.Err = errSb.ToString();
+            return r;
+        }
+
+        static void Kill(Process p)
+        {
+            int pid;
+            try { if (p.HasExited) return; pid = p.Id; } catch { return; }
+            try
+            {
+                var psi = new ProcessStartInfo("taskkill", "/PID " + pid + " /T /F");
+                psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.WindowStyle = ProcessWindowStyle.Hidden;
+                using (var k = Process.Start(psi)) { if (k != null) k.WaitForExit(10000); }
+                Log.Write("Claude 끔 pid=" + pid);
+            }
+            catch (Exception e)
+            {
+                Log.Write("Claude 끄기 실패 " + e.Message);
+                try { p.Kill(); } catch { }
+            }
+        }
+
+        // 사용자가 중지하면 돌던 Claude 를 모두 끈다
+        public static void CancelAll()
+        {
+            Process[] ps;
+            lock (running) { ps = new Process[running.Count]; running.CopyTo(ps); }
+            foreach (var p in ps) Kill(p);
+        }
+
+        static string B(bool b) { return b ? "true" : "false"; }
+        static string Err(string code, string msg) { return "{\"error\":\"" + code + "\",\"message\":\"" + HttpServer.Json(msg) + "\"}"; }
+        static string Short(string s) { s = (s ?? "").Trim(); return s.Length > 300 ? s.Substring(0, 300) : s; }
+
+        // { found, loggedIn, sub(구독 로그인), method } — 잘 되면 10분, 아니면 20초 기억(로그인한 뒤 곧 다시 보게)
+        public static string Status(bool refresh)
+        {
+            lock (statusLock) { if (!refresh && statusJson != null && DateTime.Now < statusUntil) return statusJson; }
+            string exe = Exe();
+            string json;
+            if (exe == null) json = "{\"found\":false,\"loggedIn\":false,\"sub\":false,\"method\":\"\"}";
+            else
+            {
+                var r = Run(exe, "auth status", "", null, 60000);
+                bool logged = false;
+                string method = "";
+                try
+                {
+                    var d = Ser().DeserializeObject(r.Out.Trim()) as Dictionary<string, object>;
+                    object v;
+                    if (d != null && d.TryGetValue("loggedIn", out v) && v is bool) logged = (bool)v;
+                    if (d != null && d.TryGetValue("authMethod", out v) && v != null) method = v.ToString();
+                }
+                catch { }
+                bool sub = logged && method.IndexOf("claude", StringComparison.OrdinalIgnoreCase) >= 0;
+                json = "{\"found\":true,\"loggedIn\":" + B(logged) + ",\"sub\":" + B(sub) + ",\"method\":\"" + HttpServer.Json(method) + "\"}";
+                if (!logged) Log.Write("Claude 로그인 안 됨 " + Short(r.Err + r.Out));
+            }
+            lock (statusLock)
+            {
+                statusJson = json;
+                statusUntil = DateTime.Now.AddSeconds(json.IndexOf("\"sub\":true") >= 0 ? 600 : 20);
+            }
+            return json;
+        }
+
+        static void Forget() { lock (statusLock) { statusJson = null; } }
+
+        // 로그인 창(Claude 구독 로그인 — 브라우저가 열린다). 사용자가 명령을 치지 않아도 되게
+        public static int Login(out string json)
+        {
+            string exe = Exe();
+            if (exe == null) { json = Err("ai_notfound", "이 PC에서 Claude Code를 찾지 못했습니다"); return 503; }
+            try
+            {
+                var psi = new ProcessStartInfo(exe, "auth login --claudeai");
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = false;
+                psi.WorkingDirectory = Work();
+                CleanEnv(psi);
+                Process.Start(psi);
+                Forget();
+                json = "{\"ok\":true}";
+                return 200;
+            }
+            catch (Exception e)
+            {
+                json = Err("ai_failed", "로그인 창을 띄우지 못했습니다: " + e.Message);
+                return 500;
+            }
+        }
+
+        // 앱이 보낸 것 읽기: { text, images: [{ label, type, data }] }
+        public static bool ParseRequest(string body, out string text, List<string[]> images, out string why)
+        {
+            text = null; why = null;
+            Dictionary<string, object> d;
+            try { d = Ser().DeserializeObject(body) as Dictionary<string, object>; }
+            catch { why = "요청을 읽지 못했습니다"; return false; }
+            object v;
+            if (d == null || !d.TryGetValue("text", out v) || !(v is string)) { why = "글이 없습니다"; return false; }
+            text = (string)v;
+            if (text.Length == 0 || text.Length > 300000) { why = "글이 비었거나 너무 깁니다"; return false; }
+            if (d.TryGetValue("images", out v) && v != null)
+            {
+                var arr = v as object[];
+                if (arr == null) { why = "그림 목록이 잘못됐습니다"; return false; }
+                if (arr.Length > MaxImages) { why = "그림이 너무 많습니다"; return false; }
+                foreach (var o in arr)
+                {
+                    var im = o as Dictionary<string, object>;
+                    object lb, ty, da;
+                    if (im == null || !im.TryGetValue("type", out ty) || !im.TryGetValue("data", out da) || !(ty is string) || !(da is string)) { why = "그림이 잘못됐습니다"; return false; }
+                    string type = (string)ty, data = (string)da;
+                    if (type != "image/png" && type != "image/jpeg") { why = "PNG·JPG 그림만 받습니다"; return false; }
+                    if (data.Length == 0 || data.Length > 24 * 1024 * 1024 || !Regex.IsMatch(data, "^[A-Za-z0-9+/=]+$")) { why = "그림 자료가 잘못됐습니다"; return false; }
+                    string label = im.TryGetValue("label", out lb) && lb is string ? (string)lb : "쪽 그림";
+                    if (label.Length > 100) label = label.Substring(0, 100);
+                    images.Add(new[] { label, type, data });
+                }
+            }
+            return true;
+        }
+
+        // 고치기 목록 받기 → 앱에 보낼 JSON(code 는 HTTP 상태). 앱이 끊으면 null
+        public static string Fix(string text, List<string[]> images, Func<bool> gone, out int code)
+        {
+            string st = Status(false);
+            if (st.IndexOf("\"found\":false") >= 0) { code = 503; return Err("ai_notfound", "이 PC에서 Claude Code를 찾지 못했습니다"); }
+            if (st.IndexOf("\"loggedIn\":false") >= 0) { code = 401; return Err("ai_login", "이 PC의 Claude Code에 로그인되어 있지 않습니다"); }
+            if (st.IndexOf("\"sub\":false") >= 0) { code = 403; return Err("ai_notsub", "Claude 구독이 아닌 방식으로 로그인되어 있어 쓰지 않습니다(API 요금이 들 수 있음)"); }
+            // 차례 기다리기(한 번에 3개까지)
+            while (!gate.Wait(500))
+            {
+                if (gone()) { code = 499; return null; }
+            }
+            try
+            {
+                var content = new List<object>();
+                content.Add(new Dictionary<string, object> { { "type", "text" }, { "text", "인식 결과\n" + text } });
+                foreach (var im in images)
+                {
+                    content.Add(new Dictionary<string, object> { { "type", "text" }, { "text", im[0] } });
+                    content.Add(new Dictionary<string, object> { { "type", "image" }, { "source", new Dictionary<string, object> { { "type", "base64" }, { "media_type", im[1] }, { "data", im[2] } } } });
+                }
+                var msg = new Dictionary<string, object> { { "type", "user" }, { "message", new Dictionary<string, object> { { "role", "user" }, { "content", content } } } };
+                string line = Ser().Serialize(msg) + "\n";
+                string args = Browser.JoinArgs(new[] {
+                    "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                    "--tools", "", "--restricted", "--strict-mcp-config", "--no-session-persistence", "--permission-mode", "dontAsk",
+                    "--model", "sonnet", "--effort", "medium", "--system-prompt", SystemPrompt, "--json-schema", Schema,
+                });
+                var sw = Stopwatch.StartNew();
+                var r = Run(Exe(), args, line, gone, TimeoutMs);
+                if (r.Gone) { code = 499; return null; }
+                if (r.TimedOut) { code = 504; return Err("ai_timeout", "Claude가 너무 오래 걸려 멈췄습니다"); }
+                Dictionary<string, object> res = null;
+                foreach (var l in r.Out.Split('\n'))
+                {
+                    if (l.IndexOf("\"type\":\"result\"") < 0) continue;
+                    try { res = Ser().DeserializeObject(l) as Dictionary<string, object>; } catch { }
+                }
+                if (res == null)
+                {
+                    Log.Write("AI 교정 답 없음 code=" + r.Code + " " + Short(r.Err + r.Out));
+                    string all = r.Err + r.Out;
+                    if (Regex.IsMatch(all, "log ?in|auth|401|credential", RegexOptions.IgnoreCase)) { Forget(); code = 401; return Err("ai_login", "Claude Code 로그인이 풀렸습니다. 다시 로그인해 주세요"); }
+                    code = 502;
+                    return Err("ai_failed", "Claude 답을 받지 못했습니다" + (Short(r.Err).Length > 0 ? ": " + Short(r.Err) : ""));
+                }
+                object v;
+                bool isErr = res.TryGetValue("is_error", out v) && v is bool && (bool)v;
+                string resultText = res.TryGetValue("result", out v) && v != null ? v.ToString() : "";
+                if (isErr)
+                {
+                    Log.Write("AI 교정 오류 " + Short(resultText));
+                    if (Regex.IsMatch(resultText, "limit|한도|quota|usage", RegexOptions.IgnoreCase)) { code = 429; return Err("ai_limit", "Claude 요금제 사용 한도에 닿았습니다. 잠시 뒤에 다시 해 주세요"); }
+                    if (Regex.IsMatch(resultText, "log ?in|auth|401|credential", RegexOptions.IgnoreCase)) { Forget(); code = 401; return Err("ai_login", "Claude Code 로그인이 풀렸습니다. 다시 로그인해 주세요"); }
+                    code = 502;
+                    return Err("ai_failed", Short(resultText).Length > 0 ? Short(resultText) : "Claude가 실패했습니다");
+                }
+                object edits = null, so;
+                if (res.TryGetValue("structured_output", out so) && so is Dictionary<string, object>) ((Dictionary<string, object>)so).TryGetValue("edits", out edits);
+                if (edits == null)
+                {
+                    try
+                    {
+                        var d = Ser().DeserializeObject(Regex.Replace(resultText.Trim(), "^```(?:json)?\\s*|\\s*```$", "")) as Dictionary<string, object>;
+                        if (d != null) d.TryGetValue("edits", out edits);
+                    }
+                    catch { }
+                }
+                if (!(edits is object[])) { code = 502; return Err("ai_failed", "Claude 답을 읽지 못했습니다"); }
+                object usage;
+                res.TryGetValue("usage", out usage);
+                Log.Write("AI 교정 줄 " + text.Split('\n').Length + " 그림 " + images.Count + " → 고침 " + ((object[])edits).Length + " (" + (sw.ElapsedMilliseconds / 1000) + "초)");
+                code = 200;
+                return Ser().Serialize(new Dictionary<string, object> { { "ok", true }, { "edits", edits }, { "usage", usage }, { "ms", sw.ElapsedMilliseconds } });
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+    }
+
     static class Browser
     {
         public static readonly string Exe = Find();

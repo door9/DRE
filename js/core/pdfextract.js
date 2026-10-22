@@ -13,6 +13,7 @@ export const OCR_MIN_CHARS = 20;
 export async function extractPdfDoc(pdfjs, doc, { pages = null, onProgress, isCancelled, ocr = null } = {}) {
   const analyzed = [];
   let textPages = 0, ocrPages = 0, ocrError = null;
+  const ocrList = []; // 문자 인식으로 읽은 쪽(AI 교정은 이 쪽들만 — core/aifix.js)
   for (let i = 1; i <= doc.numPages; i++) {
     if (isCancelled && isCancelled()) throw Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
     if (pages && !pages.has(i)) { analyzed.push(EMPTY_PAGE()); continue; }
@@ -37,7 +38,7 @@ export async function extractPdfDoc(pdfjs, doc, { pages = null, onProgress, isCa
           ocrError = e; // 인식기를 못 쓰면 다음 쪽부터는 시도하지 않는다
           data = null;
         }
-        if (data && data.items.length) { ocrPages++; textPages++; }
+        if (data && data.items.length) { ocrPages++; textPages++; ocrList.push(i); }
       }
       if (!data || (!data.items.length && chars > 0)) {
         if (chars > 0) textPages++;
@@ -57,7 +58,7 @@ export async function extractPdfDoc(pdfjs, doc, { pages = null, onProgress, isCa
     if (onProgress) onProgress(i / doc.numPages * 0.9);
   }
   const { blocks } = assemble(analyzed);
-  const out = { format: 'pdf', pages: doc.numPages, pageExact: true, blocks, notes: [], warnings: [] };
+  const out = { format: 'pdf', pages: doc.numPages, pageExact: true, blocks, notes: [], warnings: [], ocrPages: ocrList };
   resolveSoftBreaks(out);
   const wanted = pages ? pages.size : doc.numPages;
   if (ocrPages) out.warnings.push(`${ocrPages === wanted ? '모든 쪽' : ocrPages + '쪽'}의 글자가 그림으로 되어 있어 문자 인식으로 읽었습니다. 틀린 글자가 있을 수 있습니다.`);
@@ -104,7 +105,7 @@ export function docFromOcrPage(data) {
   const a = analyzePage(data);
   a.spaces = data.spaces;
   const { blocks } = assemble([a]);
-  const out = { format: 'image', pages: 1, pageExact: true, blocks, notes: [], warnings: [] };
+  const out = { format: 'image', pages: 1, pageExact: true, blocks, notes: [], warnings: [], ocrPages: data.items.length ? [1] : [] };
   resolveSoftBreaks(out);
   out.warnings.push(data.items.length ? '그림의 글을 문자 인식으로 읽었습니다. 틀린 글자가 있을 수 있습니다.' : '그림에서 글자를 찾지 못했습니다.');
   return out;

@@ -30,7 +30,7 @@ if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framewo
 $out = Join-Path $here 'DRE.exe'
 & $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 `
   "/win32icon:$(Join-Path $here 'dre.ico')" "/out:$out" "/resource:$zip,app.zip" `
-  /r:System.dll /r:System.Core.dll /r:Microsoft.CSharp.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
+  /r:System.dll /r:System.Core.dll /r:Microsoft.CSharp.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:System.Web.Extensions.dll `
   (Join-Path $here 'DRE.cs')
 if ($LASTEXITCODE -ne 0) { throw "빌드 실패" }
 Remove-Item $zip -Force

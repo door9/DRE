@@ -38,6 +38,7 @@ export function openEngineDialog() {
     kv.append(h('dt', { text: '상태' }), h('dd', { text: engineStatusText() }));
     if (engine.status === 'on') {
       const apps = Object.entries(engine.apps || {}).filter(([, v]) => v).map(([k]) => (k === 'browser' ? `${engine.browserName || '엣지'}(전자책)` : APP_NAMES[k] || k));
+      if (engine.ai) apps.push('Claude(AI 교정)');
       kv.append(h('dt', { text: '쓸 수 있는 프로그램' }), h('dd', { text: apps.length ? apps.join(', ') : '없음' }));
     }
   };
@@ -103,7 +104,7 @@ export function openSettings() {
     h('div.small.muted', {}, `DRE — Document Reformatting Engine · 판 ${BUILD} `, infoToggle(
       '<p><b>단축키</b>: Ctrl+O 파일 추가 · Ctrl+Enter 실행 · Delete 목록에서 빼기 · ↑↓ 파일 고르기 · Alt+↑↓ 순서 바꾸기(합치기)</p>' +
       '<p>파일·폴더를 창에 끌어다 놓아도 됩니다. 설치한 앱이면 탐색기에서 파일을 오른쪽 단추 > 연결 프로그램 > DRE 로도 열 수 있습니다.</p>')),
-    h('div.small.muted', { text: '모든 변환은 이 PC 안에서만 일어납니다. 문서를 인터넷으로 보내지 않습니다.' }),
+    h('div.small.muted', { text: '모든 변환은 이 PC 안에서만 일어납니다. 문서를 인터넷으로 보내지 않습니다. 단, 텍스트 추출의 \'AI 교정\'을 켜 두면 문자 인식한 쪽(스캔한 PDF·그림)의 글과 쪽 그림을 이 PC의 Claude를 거쳐 Claude로 보냅니다.' }),
   );
   const d = dialog('설정', body);
 }

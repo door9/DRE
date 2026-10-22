@@ -1,8 +1,10 @@
 // 항목마다 필요한 것 만들기 — PDF(DRE.exe·그림), 뽑은 글(문서 모델). 한 번 만든 것은 다시 쓴다.
 import { runJob } from './jobs.js';
-import { engine, engineConvert, engineReady, engineCan, checkEngine } from './engine.js';
+import { engine, engineConvert, engineReady, engineCan, checkEngine, aiStatus, aiFix } from './engine.js';
 import { updateItem } from './store.js';
+import { settings } from './settings.js';
 import { OFFICE, IMAGES, TEXTABLE, SHEETS, SLIDES, ENGINE_PDF, engineExt } from './core/detect.js';
+import { pageLines, linesText, applyFixes } from './core/aifix.js';
 import { baseName, extOf } from './util.js';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -74,8 +76,12 @@ export async function ensurePdf(it, { signal, onState } = {}) {
 // DRE.exe로 PDF를 만들어 그 PDF에서 뽑을 수 있나
 const engineAvailable = (it) => !!it.pdf || (engineReady() && engineCan(it.kind));
 
-// 뽑은 글(문서 모델). range: 쪽 번호 배열 또는 null
-export async function ensureText(it, { range = null, signal, onProgress, onState } = {}) {
+// 뽑은 글(문서 모델). range: 쪽 번호 배열 또는 null. 'AI 교정'이 켜져 있으면 문자 인식한 쪽을 바로잡은 사본을 돌려준다
+export async function ensureText(it, opts = {}) {
+  return withAi(it, await baseText(it, opts), opts);
+}
+
+async function baseText(it, { range = null, signal, onProgress, onState } = {}) {
   const direct = TEXTABLE.has(it.kind) && it.kind !== 'pdf' && it.probeError !== 'distribution';
   const bigPdf = it.kind === 'pdf' && (it.pages || 0) > 80;
   // 무엇을 뽑을지 정한다(이미 있으면 그대로)
@@ -149,6 +155,102 @@ export async function ensureText(it, { range = null, signal, onProgress, onState
   }
   updateItem(it, { textDoc: doc, textKey: key });
   return doc;
+}
+
+// ─── AI 교정 ───
+// 문자 인식으로 읽은 쪽(스캔한 PDF 쪽·그림)만, 쪽마다 그 쪽 글과 쪽 그림을 DRE.exe → 이 PC 의 Claude(사용자의 요금제)로 보내 고치기를 받는다.
+// 받은 고치기는 쪽마다 항목에 기억한다(그 쪽 글이 같으면 다시 묻지 않음 — 범위를 바꾸거나 다시 열어도 요금제를 또 쓰지 않게).
+// 미리 보기와 실행 단추가 같은 쪽을 함께 묻지 않게 한다. 글자가 든 보통 PDF·직접 읽는 문서는 보내지 않는다(잰 결과 AI 가 더 낫지 않음).
+export const AI_MAX_PAGES = 40;
+const AI_CONC = 3;
+
+const b64 = (blob) => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onload = () => res(String(fr.result).split(',')[1] || '');
+  fr.onerror = () => rej(fr.error);
+  fr.readAsDataURL(blob);
+});
+
+function bandLabel(it, pg, k, n) {
+  const where = IMAGES.has(it.kind) ? '그림' : `쪽 ${pg}`;
+  if (n === 1) return where;
+  if (n === 2) return `${where} ${k ? '아래' : '위'} 반쪽`;
+  return `${where} (${k + 1}/${n}, 위에서부터)`;
+}
+
+async function withAi(it, doc, { range = null, signal, onProgress, onState } = {}) {
+  if (!settings.text.ai || !doc) return doc;
+  const want = (doc.ocrPages || []).filter((p) => !range || range.includes(p));
+  if (!want.length) return doc;
+  const fail = (code, message) => ({ ...doc, warnings: (doc.warnings || []).concat(`AI 교정을 하지 못했습니다: ${message}`), ai: { fixes: [], rejected: 0, pages: 0, of: want.length, code, message } });
+  if (want.length > AI_MAX_PAGES) return fail('too_many', `문자 인식한 쪽이 ${want.length}쪽이라 너무 많습니다(쪽을 ${AI_MAX_PAGES}쪽 이하로 골라 주세요)`);
+  // 쪽 그림을 그릴 원본: PDF·그림은 그 파일, 그 밖(DRE 가 만든 PDF 에서 뽑은 옛 한글 등)은 그 PDF
+  const src = IMAGES.has(it.kind) || it.kind === 'pdf' ? it.file : it.pdf;
+  if (!src) return doc;
+  if (!it.aiPages) it.aiPages = new Map();   // 쪽 → { sig: 그 쪽 글, edits }
+  if (!it.aiInflight) it.aiInflight = new Map();
+  const lineSets = new Map(want.map((pg) => [pg, pageLines(doc, pg)]));
+  const sigOf = (pg) => lineSets.get(pg).map((l) => l.text).join('\n');
+  const known = (pg) => { const c = it.aiPages.get(pg); return !!c && c.sig === sigOf(pg); };
+  const missing = want.filter((pg) => !known(pg));
+  let failure = null;
+  if (missing.length) {
+    const st = await aiStatus();
+    if (!st.ok && st.code === 'engine_none') return doc;
+    if (!st.ok) return fail(st.code, st.message);
+    if (onState) onState('ai');
+    let done = want.length - missing.length;
+    if (onProgress) onProgress(done / want.length, 'ai');
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(AI_CONC, missing.length) }, async () => {
+      while (next < missing.length && !failure) {
+        const pg = missing[next++];
+        try {
+          await pageFix(it, src, pg, lineSets.get(pg), sigOf(pg), signal);
+        } catch (e) {
+          if (e.code === 'cancelled' || (signal && signal.aborted)) throw Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
+          failure = e;
+        }
+        done++;
+        if (onProgress) onProgress(done / want.length, 'ai');
+      }
+    }));
+  }
+  // 받아 둔 고치기를 사본에 입힌다(줄 목록은 입히기 전 사본에서 — 쪽마다 받을 때와 같은 번호)
+  const fixed = structuredClone(doc);
+  const groups = [];
+  for (const pg of want) if (known(pg)) groups.push({ lines: pageLines(fixed, pg), edits: it.aiPages.get(pg).edits });
+  const { fixes, rejected } = applyFixes(fixed, groups);
+  fixed.ai = { fixes, rejected, pages: groups.length, of: want.length };
+  if (failure) {
+    fixed.ai.code = failure.code;
+    fixed.ai.message = failure.message;
+    fixed.warnings = (fixed.warnings || []).concat(`AI 교정을 ${groups.length ? `${want.length - groups.length}쪽은 ` : ''}하지 못했습니다: ${failure.message}`);
+  }
+  return fixed;
+}
+
+// 쪽 하나: 쪽 그림(띠 PNG)을 그리고 Claude 에게 묻는다. 같은 쪽을 다른 곳이 묻고 있으면 그것을 기다리고, 그쪽이 취소되면 새로 묻는다
+async function pageFix(it, src, pg, lines, sig, signal) {
+  const busy = it.aiInflight.get(pg);
+  if (busy) {
+    try { await busy; } catch (e) { if (signal && signal.aborted) throw e; }
+    const c = it.aiPages.get(pg);
+    if (c && c.sig === sig) return;
+  }
+  const p = (async () => {
+    if (!lines.length) { it.aiPages.set(pg, { sig, edits: [] }); return; }
+    const kind = IMAGES.has(it.kind) ? it.kind : 'pdf';
+    const r = await runWorker('aiimg', { file: src, kind, pages: [pg], password: it.kind === 'pdf' ? it.password : null }, signal);
+    const page = r.pages && r.pages[0];
+    if (!page || !page.bands.length) { it.aiPages.set(pg, { sig, edits: [] }); return; }
+    const images = [];
+    for (let k = 0; k < page.bands.length; k++) images.push({ label: bandLabel(it, pg, k, page.bands.length), type: 'image/png', data: await b64(page.bands[k]) });
+    const res = await aiFix({ text: linesText(lines), images }, { signal });
+    it.aiPages.set(pg, { sig, edits: Array.isArray(res.edits) ? res.edits : [] });
+  })();
+  it.aiInflight.set(pg, p);
+  try { await p; } finally { if (it.aiInflight.get(pg) === p) it.aiInflight.delete(pg); }
 }
 
 function runWorker(type, payload, signal) {

@@ -118,6 +118,24 @@ async function ocrImage(bytes, mime, onProgress) {
   const scale = W / 595;
   return ocrGray(gray, W, H, { width: 595, height: H / scale, scale }, onProgress);
 }
+// AI 교정에 보낼 쪽 그림: 문자 인식과 같은 크기로 그린 것을 회색조 PNG 띠(가로로 자른 조각)로. A4 세로 쪽은 위·아래 반쪽 둘 —
+// Claude 는 긴 변을 약 1,568픽셀로 줄여 보므로 쪽 하나를 통째로 보내면 작은 글자가 뭉개진다(정답 있는 스캔으로 잰 방식 그대로)
+async function aiBands(src, W, H) {
+  const n = Math.max(1, Math.min(6, Math.round(H / (W * 0.75))));
+  const out = [];
+  const bh = n === 1 ? H : Math.min(H, Math.ceil((H / n) * 1.06)); // 이웃 띠와 6% 겹침(줄이 잘려 못 읽는 일 없게)
+  for (let k = 0; k < n; k++) {
+    const y = n === 1 ? 0 : Math.round(((H - bh) * k) / (n - 1));
+    const c = new OffscreenCanvas(W, bh);
+    const g = c.getContext('2d');
+    g.filter = 'grayscale(1)';
+    g.drawImage(src, 0, y, W, bh, 0, 0, W, bh);
+    out.push(await c.convertToBlob({ type: 'image/png' }));
+    c.width = c.height = 0;
+  }
+  return out;
+}
+
 const loadPdfLib = () => import('../../vendor/pdf-lib.mjs');
 
 const cancelled = new Set();
@@ -258,6 +276,53 @@ const handlers = {
     let r;
     try { r = fixToUnicode(bytes); } catch (e) { console.error('PDF 글자 대응표 바로잡기 오류', e); r = { bytes, fixed: 0 }; }
     return { blob: r.fixed ? new Blob([r.bytes], { type: 'application/pdf' }) : m.file, fixed: r.fixed };
+  },
+
+  // AI 교정에 보낼 쪽 그림(띠 PNG 들). PDF 는 pages 의 쪽마다, 그림 파일은 그 그림 → { pages: [{ pg, bands: [Blob…] }] }
+  async aiimg(m) {
+    const bytes = await bytesOf(m);
+    const out = [];
+    if (m.kind === 'pdf') {
+      const { task, doc } = await openPdf(bytes, m.password);
+      try {
+        for (const n of m.pages || []) {
+          if (n < 1 || n > doc.numPages) continue;
+          const page = await doc.getPage(n);
+          try {
+            const vp1 = page.getViewport({ scale: 1 });
+            const vp = page.getViewport({ scale: Math.min(OCR_DPI / 72, 4500 / Math.max(vp1.width, vp1.height)) });
+            const W = Math.max(1, Math.ceil(vp.width)), H = Math.max(1, Math.ceil(vp.height));
+            const canvas = new OffscreenCanvas(W, H);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, W, H);
+            await page.render({ canvas, viewport: vp, intent: 'print' }).promise;
+            out.push({ pg: n, bands: await aiBands(canvas, W, H) });
+            canvas.width = canvas.height = 0;
+          } finally {
+            page.cleanup();
+          }
+        }
+      } finally {
+        await task.destroy();
+      }
+    } else if (IMAGE_MIME[m.kind]) {
+      // 문자 인식과 같은 크기로(작은 그림은 키우고 아주 큰 그림은 줄임)
+      const bmp = await createImageBitmap(new Blob([bytes], { type: IMAGE_MIME[m.kind] }), { imageOrientation: 'from-image' });
+      const long = Math.max(bmp.width, bmp.height);
+      const k = Math.max(0.25, Math.min(3, (long < 2000 ? 2000 : Math.min(long, 4500)) / long));
+      const W = Math.max(1, Math.round(bmp.width * k)), H = Math.max(1, Math.round(bmp.height * k));
+      const canvas = new OffscreenCanvas(W, H);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bmp, 0, 0, W, H);
+      bmp.close();
+      out.push({ pg: 1, bands: await aiBands(canvas, W, H) });
+      canvas.width = canvas.height = 0;
+    }
+    return { pages: out };
   },
 
   // 그림 → PDF 한 쪽

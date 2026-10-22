@@ -34,7 +34,8 @@ export function checkEngine({ quiet = false } = {}) {
       try {
         const j = await ping(p);
         local.set('engineSeen', true);
-        set({ status: 'on', port: p, apps: j.apps || {}, browserName: j.browserName || '', version: j.version, busy: !!j.busy });
+        // ai: 이 PC 에서 Claude Code 를 찾았나(옛 DRE 는 이 값이 없다 — AI 교정을 못 한다)
+        set({ status: 'on', port: p, apps: j.apps || {}, browserName: j.browserName || '', version: j.version, busy: !!j.busy, ai: 'ai' in j ? !!j.ai : null });
         return true;
       } catch { /* 다음 자리 */ }
     }
@@ -99,6 +100,70 @@ export async function engineConvert(blob, name, to = 'pdf', { signal } = {}) {
     throw Object.assign(new Error(j.message || `DRE 오류(${r.status})`), { code: j.error || 'engine_error' });
   }
   return r.blob();
+}
+
+// ─── AI 교정 ───
+// DRE.exe 가 이 PC 의 Claude Code(사용자의 Claude 구독 로그인)를 부른다 — 따로 요금 없이 사용자의 요금제 사용량에서 나간다.
+// 앱은 문자 인식한 줄과 쪽 그림만 보낸다(지시문·답 꼴은 DRE.exe 가 정함).
+const aiErr = (code, message) => Object.assign(new Error(message), { code });
+let aiChecked = null; // { at, r } — 잘 되면 1분 기억
+let aiRecheck = false; // 로그인 창을 띄운 뒤에는 DRE.exe 가 기억한 상태 말고 새로 확인
+
+// 쓸 수 있나 → { ok, code, message }
+export async function aiStatus({ refresh = false } = {}) {
+  // DRE 상태는 화면을 다시 볼 때마다 새로 확인된다(watchEngine) — 여기서 또 찾느라 문서마다 기다리지 않게, 확인 중일 때만 기다린다
+  if (engine.status === 'checking' || engine.status === 'starting') await checkEngine({ quiet: true });
+  // 이 브라우저에서 DRE 를 본 적이 없으면(공개 주소만 쓰는 PC 등) AI 교정은 조용히 건너뛴다
+  if (engine.status === 'none') return { ok: false, code: 'engine_none', message: '이 PC에 DRE가 없습니다' };
+  if (engine.status !== 'on') return { ok: false, code: 'engine_off', message: 'DRE가 꺼져 있습니다' };
+  if (engine.ai == null) return { ok: false, code: 'engine_old', message: '설치된 DRE가 옛 판입니다. DRE를 새로 내려받아 설치해 주세요' };
+  if (!engine.ai) return { ok: false, code: 'ai_notfound', message: '이 PC에서 Claude Code를 찾지 못했습니다' };
+  if (!refresh && !aiRecheck && aiChecked && aiChecked.r.ok && Date.now() - aiChecked.at < 60000) return aiChecked.r;
+  let j;
+  try {
+    const r = await fetch(`${hostFor(engine.port)}/v1/ai/status${refresh || aiRecheck ? '?refresh=1' : ''}`, { cache: 'no-store', signal: AbortSignal.timeout(70000) });
+    j = await r.json();
+  } catch {
+    return { ok: false, code: 'engine_off', message: 'DRE와 연결이 끊겼습니다' };
+  }
+  let res = { ok: true };
+  if (!j.found) res = { ok: false, code: 'ai_notfound', message: '이 PC에서 Claude Code를 찾지 못했습니다' };
+  else if (!j.loggedIn) res = { ok: false, code: 'ai_login', message: '이 PC의 Claude Code에 로그인되어 있지 않습니다' };
+  else if (!j.sub) res = { ok: false, code: 'ai_notsub', message: 'Claude 구독이 아닌 방식으로 로그인되어 있어 쓰지 않습니다(API 요금이 들 수 있음)' };
+  aiChecked = { at: Date.now(), r: res };
+  if (res.ok) aiRecheck = false;
+  return res;
+}
+
+// 고치기 목록 받기. body: { text: '줄번호: 내용…', images: [{ label, type: 'image/png', data: base64 }] } → { edits, usage, ms }
+export async function aiFix(body, { signal } = {}) {
+  let r;
+  try {
+    r = await fetch(`${hostFor(engine.port)}/v1/ai?task=ocrfix`, {
+      method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' }, signal, cache: 'no-store',
+    });
+  } catch {
+    if (signal && signal.aborted) throw aiErr('cancelled', '취소했습니다');
+    await checkEngine({ quiet: true });
+    throw aiErr('engine_off', 'DRE와 연결이 끊겼습니다');
+  }
+  let j = {};
+  try { j = await r.json(); } catch { /* 글이 아님 */ }
+  if (!r.ok || !j.ok) {
+    if (j.error === 'ai_login' || j.error === 'ai_notsub') aiChecked = null;
+    throw aiErr(j.error || 'ai_failed', j.message || `AI 교정 오류(${r.status})`);
+  }
+  return j;
+}
+
+// Claude 로그인 창 띄우기(DRE.exe 가 'claude auth login' 을 창으로 연다 — 브라우저에서 Claude 계정으로 로그인)
+export async function aiLogin() {
+  aiChecked = null;
+  aiRecheck = true;
+  const r = await fetch(`${hostFor(engine.port)}/v1/ai/login`, { method: 'POST', cache: 'no-store' });
+  let j = {};
+  try { j = await r.json(); } catch { /* 글이 아님 */ }
+  if (!r.ok) throw aiErr(j.error || 'ai_failed', j.message || '로그인 창을 띄우지 못했습니다');
 }
 
 // 화면을 다시 볼 때 DRE.exe 상태를 새로(너무 자주는 말고)

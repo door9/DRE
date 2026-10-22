@@ -13,6 +13,7 @@ const DEFAULTS = {
     table: 'tab',          // 표: tab | grid | lines
     notes: 'end',          // 각주: end | none
     pageMarks: false,      // 쪽 구분 표시
+    ai: true,              // AI 교정: 문자 인식한 쪽을 이 PC 의 Claude(사용자의 요금제)가 쪽 그림과 맞대어 바로잡기
   },
   eol: 'crlf',             // 줄 끝: crlf(윈도우) | lf
   bom: true,               // UTF-8 표시(BOM) — 한글·메모장 등에서 글자가 안 깨지게

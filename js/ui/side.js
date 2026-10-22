@@ -6,7 +6,7 @@ import { parseRange, formatRange, render } from '../core/model.js';
 import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, TO_IMAGE, kindLabel } from '../core/detect.js';
 import { ensurePdf, ensureText } from '../produce.js';
 import { openThumbDoc, renderThumb, imageSize } from '../thumbs.js';
-import { engine, engineReady, launchEngine, onEngine } from '../engine.js';
+import { engine, engineReady, launchEngine, onEngine, aiLogin } from '../engine.js';
 import { mergeName, runnable } from '../run.js';
 import { prepareSave, saveOutput, textBlob } from '../save.js';
 
@@ -181,9 +181,9 @@ function rangeSection(it, { open = true } = {}) {
 }
 
 // ─── 글 미리 보기(텍스트 추출) ───
-function textOptionsBar(onChange) {
+function textOptionsBar(onChange, onReload) {
   const t = settings.text;
-  const chk = (key, label) => h('label.check', {}, h('input', { type: 'checkbox', checked: t[key] || null, onchange: (e) => { t[key] = e.target.checked; saveSettings(); onChange(); } }), label);
+  const chk = (key, label, then = onChange) => h('label.check', {}, h('input', { type: 'checkbox', checked: t[key] || null, onchange: (e) => { t[key] = e.target.checked; saveSettings(); then(); } }), label);
   const seg = (key, opts) => {
     const box = h('span.seg');
     for (const [v, label] of opts) {
@@ -198,11 +198,13 @@ function textOptionsBar(onChange) {
     h('span.field', {}, h('span', { text: '표' }), seg('table', [['tab', '탭'], ['grid', '선'], ['lines', '줄글']])),
     h('span.field', {}, h('span', { text: '빈 줄' }), seg('blank', [['source', '원본대로'], ['none', '없이'], ['all', '문단마다']])),
     chk('pageMarks', '쪽 표시'),
+    chk('ai', 'AI 교정', onReload),
     infoToggle(`<p><b>줄 이어 붙이기</b>: PDF처럼 줄이 중간에 끊긴 글을 문장으로 다시 잇습니다('되었' + '습니다' → '되었습니다'). 끄면 원래 줄대로 둡니다.</p>
       <p><b>머리말·쪽 번호 빼기</b>: 쪽마다 되풀이되는 머리말·꼬리말과 쪽 번호를 뺍니다(PDF).</p>
       <p><b>표</b>: 탭 = 칸 사이를 탭으로(엑셀·한글 표에 붙여 넣기 좋음), 선 = 선으로 그린 표(고정폭 글꼴용), 줄글 = 칸마다 한 줄.</p>
       <p><b>쪽 표시</b>: 쪽이 바뀌는 곳에 '── 3쪽 ──'을 넣습니다.</p>
-      <p><b>문자 인식</b>: 스캔한 PDF의 쪽과 그림은 그림 속 글자를 읽어 냅니다(인터넷 없이). 틀린 글자가 있을 수 있어 중요한 숫자·이름은 원본과 맞춰 보세요.</p>`),
+      <p><b>문자 인식</b>: 스캔한 PDF의 쪽과 그림은 그림 속 글자를 읽어 냅니다(인터넷 없이). 틀린 글자가 있을 수 있어 중요한 숫자·이름은 원본과 맞춰 보세요.</p>
+      <p><b>AI 교정</b>: 문자 인식으로 읽은 쪽을 이 PC의 Claude가 쪽 그림과 맞대어 바로잡습니다(잘못 읽은 글자·알아보지 못한 낱말·끼어든 잡티). 지금 쓰는 Claude 요금제 안에서 쓰며 따로 요금이 들지 않습니다(사용량은 요금제에서 나감). 쪽마다 10~20초 더 걸리고, 그 쪽의 글과 그림이 Claude로 보내집니다. 글자가 들어 있는 보통 PDF와 한글·워드 문서는 보내지 않습니다. 고친 곳은 'AI 교정 N곳'을 누르면 보입니다.</p>`),
   );
   return bar;
 }
@@ -214,7 +216,31 @@ function textSection(it) {
   const warnBox = h('div.warnbox', { hidden: true });
   const copyBtn = h('button.btn.tiny', { type: 'button', html: `${ico('copy')}복사`, disabled: true });
   const saveBtn = h('button.btn.tiny', { type: 'button', html: `${ico('save')}이 파일만 저장`, disabled: true });
+  // AI 교정 결과: 'AI 교정 N곳'을 누르면 고친 곳 목록(원래 글 → 고친 글)
+  const aiBtn = h('button.btn.tiny.ai-btn', { type: 'button', hidden: true, 'aria-expanded': 'false' });
+  const aiBox = h('div.aibox', { hidden: true });
+  aiBtn.addEventListener('click', () => {
+    const open = aiBox.hidden;
+    aiBox.hidden = !open;
+    aiBtn.setAttribute('aria-expanded', String(open));
+  });
   let doc = null;
+  const drawAi = () => {
+    const ai = doc && doc.ai;
+    aiBtn.hidden = !ai || !ai.pages;
+    if (aiBtn.hidden) { aiBox.hidden = true; return; }
+    const n = ai.fixes.length;
+    aiBtn.innerHTML = `${ico('check')}AI 교정 ${n ? `${fmtNum(n)}곳` : '— 고칠 곳 없음'}`;
+    aiBtn.disabled = !n;
+    aiBox.innerHTML = '';
+    const pageOf = !IMAGES.has(it.kind);
+    for (const f of ai.fixes) {
+      aiBox.append(h('div.fx', {},
+        pageOf ? h('span.pg', { text: `${f.pg}쪽` }) : null,
+        h('del', { text: f.from }), h('span.arrow', { text: '→' }), h('ins', { text: f.to || '(지움)' })));
+    }
+    if (!n) aiBox.hidden = true;
+  };
   const draw = () => {
     if (!doc) return;
     const opts = renderOptions();
@@ -227,10 +253,17 @@ function textSection(it) {
     const warns = doc.warnings || [];
     warnBox.hidden = !warns.length;
     warnBox.textContent = warns.join(' ');
+    // Claude 로그인이 풀렸으면 로그인 창을 띄울 단추
+    if (doc.ai && doc.ai.code === 'ai_login') {
+      warnBox.append(h('div.row', { style: 'margin-top:6px' },
+        h('button.btn.tiny', { type: 'button', text: 'Claude 로그인', onclick: async () => { try { await aiLogin(); toast('로그인 창을 열었습니다. 로그인한 뒤 \'다시 시도\'를 누르세요', { ms: 8000 }); } catch (e) { toast(e.message, { bad: true }); } } }),
+        h('button.btn.tiny', { type: 'button', text: '다시 시도', onclick: () => load() })));
+    }
+    drawAi();
   };
-  const bar = textOptionsBar(draw);
-  const actions = h('div.row', { style: 'padding:6px 14px;border-bottom:1px solid var(--line)' }, copyBtn, saveBtn, h('div.grow'), stat);
-  wrap.append(bar, actions, warnBox, out);
+  const bar = textOptionsBar(draw, () => load());
+  const actions = h('div.row', { style: 'padding:6px 14px;border-bottom:1px solid var(--line)' }, copyBtn, saveBtn, aiBtn, h('div.grow'), stat);
+  wrap.append(bar, actions, warnBox, aiBox, out);
 
   copyBtn.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(out.value); toast('글을 복사했습니다'); } catch { out.select(); document.execCommand('copy'); toast('글을 복사했습니다'); }
@@ -256,8 +289,8 @@ function textSection(it) {
     try {
       doc = await ensureText(it, {
         range: it.range, signal: ac.signal,
-        onProgress: (v, note) => { if (textAbort === ac) stat.textContent = `${note === 'ocr' ? '문자 인식 중' : '글 뽑는 중'}… ${Math.round(v * 100)}%`; },
-        onState: (s) => { if (textAbort === ac) stat.textContent = s === 'engine' ? '쪽을 맞추려고 PDF 만드는 중…' : s === 'engine-wait' ? '차례 기다리는 중…' : s === 'ocr' ? '문자 인식 중…' : '글 뽑는 중…'; },
+        onProgress: (v, note) => { if (textAbort === ac) stat.textContent = `${note === 'ocr' ? '문자 인식 중' : note === 'ai' ? 'AI 교정 중' : '글 뽑는 중'}… ${Math.round(v * 100)}%`; },
+        onState: (s) => { if (textAbort === ac) stat.textContent = s === 'engine' ? '쪽을 맞추려고 PDF 만드는 중…' : s === 'engine-wait' ? '차례 기다리는 중…' : s === 'ocr' ? '문자 인식 중…' : s === 'ai' ? 'AI 교정 중…' : '글 뽑는 중…'; },
       });
       if (textAbort !== ac || current !== it) return;
       draw();

@@ -188,15 +188,19 @@ async function convertOne(it, session) {
 
 async function textOne(it, session) {
   const signal = abort.signal;
-  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' || s === 'pack' ? '쪽 맞추려고 PDF 만드는 중' : s === 'ocr' ? '문자 인식 중' : '글 뽑는 중' });
-  const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v, note) => updateItem(it, note === 'ocr' ? { progress: v, msg: '문자 인식 중' } : { progress: v }) });
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'engine' || s === 'pack' ? '쪽 맞추려고 PDF 만드는 중' : s === 'ocr' ? '문자 인식 중' : s === 'ai' ? 'AI 교정 중' : '글 뽑는 중' });
+  const doc = await ensureText(it, { range: it.range, signal, onState, onProgress: (v, note) => updateItem(it, note === 'ocr' ? { progress: v, msg: '문자 인식 중' } : note === 'ai' ? { progress: v, msg: 'AI 교정 중' } : { progress: v }) });
   const text = render(doc, renderOptions(), it.range ? new Set(it.range) : null);
   const blob = textBlob(text, { bom: settings.bom });
   const saved = await saveOutput(session, it, `${baseName(it.name)}.txt`, blob);
   // 많이 한꺼번에 뽑을 때는 보고 있지 않은 문서의 뽑은 글을 바로 놓아 메모리를 아낀다(다시 고르면 새로 뽑음)
   if (store.items.length > 20 && store.selected !== it.id) updateItem(it, { textDoc: null, textKey: null });
-  const warn = !text.trim() ? '뽑을 글이 없습니다' + (doc.warnings && doc.warnings[0] ? ` — ${doc.warnings[0]}` : '') : null;
-  return { saved, blob, warn: warn ? `${warn} (저장: ${saved.name})` : null };
+  let warn = !text.trim() ? '뽑을 글이 없습니다' + (doc.warnings && doc.warnings[0] ? ` — ${doc.warnings[0]}` : '') : null;
+  // AI 교정: 고친 곳 수를 알리고, 못 했으면(로그인·한도 등) 까닭을 경고로
+  const ai = doc.ai;
+  if (!warn && ai && ai.code) warn = `AI 교정을 하지 못했습니다 — ${ai.message}`;
+  const msg = ai && ai.pages && !ai.code ? `저장: ${saved.name} · AI 교정 ${ai.fixes.length}곳` : null;
+  return { saved, blob, msg, warn: warn ? `${warn} (저장: ${saved.name})` : null };
 }
 
 // 형식 변환: PDF 쪽 → 그림 파일(쪽마다 하나). 한 쪽씩 그려 바로 저장한다(쪽이 많아도 메모리에 쌓이지 않게).

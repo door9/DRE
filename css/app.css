@@ -270,3 +270,12 @@ details.side-body > summary { cursor: pointer; color: var(--muted); font-size: 1
 details.side-body[open] > summary { margin-bottom: 8px; }
 .range-sec .row strong { font-size: 13px; margin-right: 4px; }
 .side-note.small { padding: 8px 0 0; text-align: left; }
+
+/* AI 교정 — 고친 곳 목록(원래 글 → 고친 글) */
+.aibox { margin: 8px 14px 0; padding: 8px 10px; border-radius: var(--radius); background: var(--panel-2); font-size: 12.5px; max-height: 220px; overflow: auto; }
+.aibox .fx { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 2px 0; }
+.aibox .fx + .fx { border-top: 1px solid var(--line); }
+.aibox .pg { color: var(--muted); min-width: 34px; }
+.aibox del { color: var(--bad); text-decoration: line-through; word-break: break-all; }
+.aibox ins { color: var(--ok); text-decoration: none; font-weight: 600; word-break: break-all; }
+.aibox .arrow { color: var(--muted); }
