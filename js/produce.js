@@ -179,7 +179,7 @@ function bandLabel(it, pg, k, n) {
 }
 
 async function withAi(it, doc, { range = null, signal, onProgress, onState } = {}) {
-  if (!settings.text.ai || !doc) return doc;
+  if (!settings.text.aiFix || !doc) return doc;
   const want = (doc.ocrPages || []).filter((p) => !range || range.includes(p));
   if (!want.length) return doc;
   const fail = (code, message) => ({ ...doc, warnings: (doc.warnings || []).concat(`AI 교정을 하지 못했습니다: ${message}`), ai: { fixes: [], rejected: 0, pages: 0, of: want.length, code, message } });

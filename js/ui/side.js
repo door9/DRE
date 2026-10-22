@@ -198,7 +198,7 @@ function textOptionsBar(onChange, onReload) {
     h('span.field', {}, h('span', { text: '표' }), seg('table', [['tab', '탭'], ['grid', '선'], ['lines', '줄글']])),
     h('span.field', {}, h('span', { text: '빈 줄' }), seg('blank', [['source', '원본대로'], ['none', '없이'], ['all', '문단마다']])),
     chk('pageMarks', '쪽 표시'),
-    chk('ai', 'AI 교정', onReload),
+    chk('aiFix', 'AI 교정', onReload),
     infoToggle(`<p><b>줄 이어 붙이기</b>: PDF처럼 줄이 중간에 끊긴 글을 문장으로 다시 잇습니다('되었' + '습니다' → '되었습니다'). 끄면 원래 줄대로 둡니다.</p>
       <p><b>머리말·쪽 번호 빼기</b>: 쪽마다 되풀이되는 머리말·꼬리말과 쪽 번호를 뺍니다(PDF).</p>
       <p><b>표</b>: 탭 = 칸 사이를 탭으로(엑셀·한글 표에 붙여 넣기 좋음), 선 = 선으로 그린 표(고정폭 글꼴용), 줄글 = 칸마다 한 줄.</p>

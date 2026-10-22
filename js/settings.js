@@ -13,7 +13,9 @@ const DEFAULTS = {
     table: 'tab',          // 표: tab | grid | lines
     notes: 'end',          // 각주: end | none
     pageMarks: false,      // 쪽 구분 표시
-    ai: true,              // AI 교정: 문자 인식한 쪽을 이 PC 의 Claude(사용자의 요금제)가 쪽 그림과 맞대어 바로잡기
+    // AI 교정: 문자 인식한 쪽을 이 PC 의 Claude(사용자의 요금제)가 쪽 그림과 맞대어 바로잡기. 기본 끔 — 2026-10-22 사용자:
+    // "AI 교정은 기본으로 꺼 두고, 필요할 때 내가 켜게". 첫 판(9febd25974)은 'ai'(기본 켬)로 저장했으므로 이름을 바꿔 모두 꺼진 채로 시작한다
+    aiFix: false,
   },
   eol: 'crlf',             // 줄 끝: crlf(윈도우) | lf
   bom: true,               // UTF-8 표시(BOM) — 한글·메모장 등에서 글자가 안 깨지게
@@ -31,6 +33,7 @@ function merge(base, over) {
 }
 
 export const settings = merge(DEFAULTS, local.get('settings', {}));
+delete settings.text.ai; // 첫 판의 'AI 교정' 값(기본 켬) — 이제 aiFix 만 본다
 
 export function saveSettings() {
   local.set('settings', settings);
