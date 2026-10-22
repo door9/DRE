@@ -13,11 +13,11 @@ import { BUILD } from './version.js';
 
 const RUN_LABEL = { pdf: 'PDF로 변환', text: '텍스트 추출', merge: 'PDF로 합치기' };
 
-// 실행 단추 이름. 형식 변환은 바꿀 형식과 만들 그림 수('PNG로 변환 (12장)'), 나머지는 파일 수
+// 실행 단추 이름. 형식 변환은 바꿀 형식과 만들 그림 수('PNG로 변환 (12장)', 쪽 수를 어림한 한글·워드가 있으면 '약 12장'), 나머지는 파일 수
 function runLabel(n) {
   if (store.mode === 'convert') {
-    const k = imageCount();
-    return `${settings.convert.to === 'jpg' ? 'JPG' : 'PNG'}로 변환${k > 1 ? ` (${fmtNum(k)}장)` : ''}`;
+    const { n: k, approx } = imageCount();
+    return `${settings.convert.to === 'jpg' ? 'JPG' : 'PNG'}로 변환${k > 1 ? ` (${approx ? '약 ' : ''}${fmtNum(k)}장)` : ''}`;
   }
   return RUN_LABEL[store.mode] + (n > 1 && store.mode !== 'merge' ? ` (${n})` : '');
 }

@@ -65,6 +65,8 @@ export const ENGINE_PDF = new Set([...OFFICE, 'epub']);
 export const SHEETS = new Set(['xls', 'xlsx', 'ods']);   // 시트 하나 = 한 쪽(어림)
 export const SLIDES = new Set(['ppt', 'pptx', 'odp']);   // 슬라이드 하나 = 한 쪽(정확)
 export const IMAGES = new Set(['jpg', 'png', 'gif', 'bmp', 'webp']);
+// 형식 변환(쪽 → 그림)에 넣을 수 있는 것: PDF 와, DRE.exe 가 이 PC 의 한글·워드로 PDF 를 만들어 주는 한글·워드 문서
+export const TO_IMAGE = new Set(['pdf', 'hwp', 'hwp3', 'hwpx', 'doc', 'docx']);
 
 // DRE.exe(한글·워드…)에게 보낼 때 쓸 확장자
 export function engineExt(kind) {

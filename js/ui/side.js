@@ -3,7 +3,7 @@ import { store, on, selectedItem, updateItem, emit } from '../store.js';
 import { settings, saveSettings, renderOptions } from '../settings.js';
 import { h, ico, esc, fmtNum, infoToggle, toast, debounce, baseName } from '../util.js';
 import { parseRange, formatRange, render } from '../core/model.js';
-import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, kindLabel } from '../core/detect.js';
+import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, TO_IMAGE, kindLabel } from '../core/detect.js';
 import { ensurePdf, ensureText } from '../produce.js';
 import { openThumbDoc, renderThumb, imageSize } from '../thumbs.js';
 import { engine, engineReady, launchEngine, onEngine } from '../engine.js';
@@ -323,7 +323,8 @@ function convertBar() {
     infoToggle(`<p><b>PNG</b>는 글자·표·선이 또렷하고, <b>JPG</b>는 사진이 많은 쪽에 알맞고 파일이 작습니다.</p>
       <p><b>해상도</b>: 화면에서 보거나 메신저로 보낼 때는 150, 인쇄하거나 크게 확대해 볼 때는 300을 고르세요. 600은 파일이 아주 큽니다.</p>
       <p>그림에 해상도를 적어 두므로 한글·워드에 넣으면 원래 종이 크기로 들어갑니다.</p>
-      <p>쪽마다 그림 파일 하나로 저장합니다(이름 뒤에 '(3쪽)'). 쪽을 고르지 않으면 모든 쪽을 바꿉니다.</p>`),
+      <p>쪽마다 그림 파일 하나로 저장합니다(이름 뒤에 '(3쪽)'). 쪽을 고르지 않으면 모든 쪽을 바꿉니다.</p>
+      <p><b>한글·워드 문서</b>는 DRE가 이 PC의 한글·워드로 PDF를 만든 뒤 그 쪽을 그립니다(DRE가 켜져 있어야 합니다). 쪽 그림도 그 PDF로 보여 줍니다.</p>`),
   );
 }
 
@@ -368,12 +369,12 @@ export function renderSide() {
   if (mode === 'convert') {
     box.append(convertBar());
     if (!it) {
-      box.append(h('div.side-note', { html: 'PDF의 쪽을 그림 파일(PNG·JPG)로 바꿉니다.<br>파일을 고르면 쪽을 골라 바꿀 수 있습니다.' }));
+      box.append(h('div.side-note', { html: 'PDF·한글·워드 문서의 쪽을 그림 파일(PNG·JPG)로 바꿉니다.<br>파일을 고르면 쪽을 골라 바꿀 수 있습니다.' }));
       return;
     }
     box.append(h('div.side-head', {}, h('h2', { text: it.name, title: it.name })));
     const body = h('div.side-body');
-    body.append(it.kind === 'pdf' ? rangeSection(it, { open: true }) : h('div.side-note.small', { text: 'PDF만 그림으로 바꿀 수 있습니다.' }));
+    body.append(TO_IMAGE.has(it.kind) ? rangeSection(it, { open: true }) : h('div.side-note.small', { text: 'PDF·한글·워드 문서만 그림으로 바꿀 수 있습니다.' }));
     box.append(body);
     return;
   }

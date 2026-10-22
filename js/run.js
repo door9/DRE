@@ -6,7 +6,7 @@ import { runJob, cancelAll } from './jobs.js';
 import { prepareSave, saveOutput, textBlob } from './save.js';
 import { render, formatRange } from './core/model.js';
 import { engine, engineReady, launchEngine, engineCan } from './engine.js';
-import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF } from './core/detect.js';
+import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF, TO_IMAGE } from './core/detect.js';
 import { openThumbDoc, renderPageImage } from './thumbs.js';
 import { baseName, fmtNum, toast } from './util.js';
 
@@ -16,7 +16,8 @@ let starting = false; // DRE.exe 켜기·폴더 권한을 기다리는 동안 �
 // 이 할 일에 넣을 수 있는가(못 하면 까닭)
 export function whyNot(it, mode) {
   if (it.kind === 'unknown') return '알 수 없는 형식입니다';
-  if (mode === 'convert' && it.kind !== 'pdf') return 'PDF만 그림으로 바꿀 수 있습니다';
+  // 목록 줄에 뜨는 글이라 짧게(휴대폰 폭에서 줄이 넘치지 않게) — 자세한 안내는 오른쪽 패널에
+  if (mode === 'convert' && !TO_IMAGE.has(it.kind)) return 'PDF·한글·워드만 바꿀 수 있습니다';
   if (it.probeError === 'broken') return it.probeMsg || '파일이 손상된 것 같습니다';
   if (it.probeError === 'password' && it.kind !== 'pdf') return '암호가 걸린 문서입니다';
   if (it.probeError === 'distribution' && mode === 'text') return null; // 배포용 한글: DRE.exe로 PDF를 만든 뒤 뽑는다(produce.js)
@@ -34,9 +35,15 @@ export function runnable(mode) {
   return store.items.filter((it) => !whyNot(it, mode));
 }
 
-// 형식 변환으로 만들 그림 수(고른 쪽, 안 골랐으면 전체 쪽)
+// 형식 변환으로 만들 그림 수(고른 쪽, 안 골랐으면 전체 쪽). approx: 쪽 수를 어림한 한글·워드 문서를 전체로 넣었는가
+// (DRE 가 PDF 를 만들어 쪽 그림을 보여 주면 정확해진다)
 export function imageCount() {
-  return runnable('convert').reduce((a, it) => a + (it.range ? it.range.length : it.pages || 0), 0);
+  let n = 0, approx = false;
+  for (const it of runnable('convert')) {
+    n += it.range ? it.range.length : it.pages || 0;
+    if (!it.range && !it.pageExact) approx = true;
+  }
+  return { n, approx };
 }
 
 export function mergeName() {
@@ -72,8 +79,8 @@ export async function runAll() {
 
 async function runInner(mode, items) {
 
-  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만. 형식 변환은 PDF만이라 필요 없음)
-  const wantEngine = mode !== 'convert' && items.some((it) => (mode === 'text' ? textNeedsEngine(it) : needsEngine(it)));
+  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만. 형식 변환은 한글·워드 문서만)
+  const wantEngine = items.some((it) => (mode === 'text' ? textNeedsEngine(it) : mode === 'convert' ? it.kind !== 'pdf' : needsEngine(it)));
   let enginePromise = null;
   if (wantEngine && !engineReady()) enginePromise = launchEngine();
 
@@ -92,7 +99,8 @@ async function runInner(mode, items) {
       // 글 뽑기에서 DRE가 꼭 있어야 하는 것은 옛 한글·배포용 한글뿐(나머지는 쪽을 어림해 직접 뽑는다)
       const hard = mode !== 'text' || items.some((it) => (OFFICE.has(it.kind) && !TEXTABLE.has(it.kind)) || it.probeError === 'distribution');
       if (hard) {
-        toast(mode === 'text' ? 'DRE를 켜지 못해 옛 한글·배포용 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드·전자책 문서는 건너뜁니다.', { bad: true, ms: 6000 });
+        toast(mode === 'text' ? 'DRE를 켜지 못해 옛 한글·배포용 문서는 건너뜁니다.'
+          : mode === 'convert' ? 'DRE를 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드·전자책 문서는 건너뜁니다.', { bad: true, ms: 6000 });
         import('./ui/dialogs.js').then((m) => m.openEngineDialog());
       } else toast('DRE를 켜지 못해 쪽 나눔은 문서 안 정보로 어림합니다.', { ms: 5000 });
     }
@@ -192,28 +200,39 @@ async function textOne(it, session) {
 }
 
 // 형식 변환: PDF 쪽 → 그림 파일(쪽마다 하나). 한 쪽씩 그려 바로 저장한다(쪽이 많아도 메모리에 쌓이지 않게).
+// 한글·워드 문서는 DRE.exe 가 이 PC 의 한글·워드로 만든 PDF 에서 그린다(쪽 그림을 볼 때 만든 PDF 가 있으면 그것을 다시 쓴다).
 // 한 쪽을 못 그려도 나머지는 이어서 하고 끝에 알린다. 멈추거나 실패하면 그때까지 저장한 장 수를 오류에 붙인다(e.saved)
 async function imagesOne(it, session) {
   const signal = abort.signal;
   const ext = settings.convert.to === 'jpg' ? 'jpg' : 'png';
   const dpi = settings.convert.dpi || 150;
   const cancelled = () => Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
+  const isPdf = it.kind === 'pdf';
+  let src = it.file;
+  if (!isPdf) {
+    const app = it.kind.startsWith('hwp') ? '한글' : '워드';
+    src = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : `${app}로 PDF 만드는 중` }) });
+  }
   updateItem(it, { msg: 'PDF 여는 중' });
   let hd;
   try {
-    hd = await openThumbDoc(it.file, it.password);
+    hd = await openThumbDoc(src, isPdf ? it.password : null);
   } catch (e) {
-    if (e && e.name === 'PasswordException') {
+    if (isPdf && e && e.name === 'PasswordException') {
       updateItem(it, { needsPassword: true, password: null });
       throw Object.assign(new Error(e.code === 2 ? '암호가 맞지 않습니다' : '열 때 암호가 필요한 PDF입니다'), { code: 'password' });
     }
-    throw Object.assign(new Error('PDF를 열지 못했습니다(손상된 파일일 수 있습니다)'), { code: 'broken' });
+    throw Object.assign(new Error(isPdf ? 'PDF를 열지 못했습니다(손상된 파일일 수 있습니다)' : 'DRE가 만든 PDF를 열지 못했습니다'), { code: 'broken' });
   }
   const names = [], failed = [];
   try {
     const total = hd.pages;
-    if (!it.pages) updateItem(it, { pages: total, pageExact: true });
-    const pages = (it.range || Array.from({ length: total }, (_, i) => i + 1)).filter((n) => n >= 1 && n <= total);
+    // 한글·워드는 쪽 수를 어림했었다 — 실제 PDF 쪽 수로 바로잡는다
+    if (isPdf ? !it.pages : it.pdfPages !== total) updateItem(it, isPdf ? { pages: total, pageExact: true } : { pdfPages: total, pages: total, pageExact: true });
+    const want = it.range || Array.from({ length: total }, (_, i) => i + 1);
+    const pages = want.filter((n) => n >= 1 && n <= total);
+    // 어림한 쪽 수로 골랐다면 실제 문서에 없는 쪽이 있을 수 있다(건너뛰고 알린다)
+    const missing = want.filter((n) => n > total);
     if (!pages.length) throw Object.assign(new Error(`고른 쪽이 문서에 없습니다(전체 ${total}쪽)`), { code: 'range' });
     let one = null, minDpi = dpi;
     for (const n of pages) {
@@ -237,7 +256,8 @@ async function imagesOne(it, session) {
     if (!names.length) throw Object.assign(new Error(`쪽을 그리지 못했습니다(${formatRange(failed)}쪽)`), { code: 'render' });
     let msg = `저장: ${names[0]}${names.length > 1 ? ` 외 ${fmtNum(names.length - 1)}장` : ''}`;
     if (minDpi < dpi) msg += ` · 큰 쪽은 약 ${Math.floor(minDpi)}dpi로 낮춤`;
-    const warn = failed.length ? `${formatRange(failed)}쪽은 그리지 못했습니다 (${msg})` : null;
+    const warn = failed.length ? `${formatRange(failed)}쪽은 그리지 못했습니다 (${msg})`
+      : missing.length ? `${formatRange(missing)}쪽은 문서에 없어 건너뛰었습니다(전체 ${total}쪽) (${msg})` : null;
     return { msg, warn, count: names.length, blob: one };
   } catch (e) {
     e.saved = names.length;
