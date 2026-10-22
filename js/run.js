@@ -1,4 +1,4 @@
-// 실행 — 고른 할 일(PDF로 변환 / 텍스트 추출 / PDF 합치기)을 목록 차례대로 처리하고 저장한다
+// 실행 — 고른 할 일(PDF로 변환 / 텍스트 추출 / PDF 합치기 / 형식 변환)을 목록 차례대로 처리하고 저장한다
 import { store, updateItem, emit } from './store.js';
 import { settings, renderOptions } from './settings.js';
 import { ensurePdf, ensureText, needsEngine, textNeedsEngine } from './produce.js';
@@ -7,7 +7,8 @@ import { prepareSave, saveOutput, textBlob } from './save.js';
 import { render, formatRange } from './core/model.js';
 import { engine, engineReady, launchEngine, engineCan } from './engine.js';
 import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF } from './core/detect.js';
-import { baseName, toast } from './util.js';
+import { openThumbDoc, renderPageImage } from './thumbs.js';
+import { baseName, fmtNum, toast } from './util.js';
 
 let abort = null;
 let starting = false; // DRE.exe 켜기·폴더 권한을 기다리는 동안 두 번 눌리지 않게
@@ -15,6 +16,7 @@ let starting = false; // DRE.exe 켜기·폴더 권한을 기다리는 동안 �
 // 이 할 일에 넣을 수 있는가(못 하면 까닭)
 export function whyNot(it, mode) {
   if (it.kind === 'unknown') return '알 수 없는 형식입니다';
+  if (mode === 'convert' && it.kind !== 'pdf') return 'PDF만 그림으로 바꿀 수 있습니다';
   if (it.probeError === 'broken') return it.probeMsg || '파일이 손상된 것 같습니다';
   if (it.probeError === 'password' && it.kind !== 'pdf') return '암호가 걸린 문서입니다';
   if (it.probeError === 'distribution' && mode === 'text') return null; // 배포용 한글: DRE.exe로 PDF를 만든 뒤 뽑는다(produce.js)
@@ -30,6 +32,11 @@ export function whyNot(it, mode) {
 
 export function runnable(mode) {
   return store.items.filter((it) => !whyNot(it, mode));
+}
+
+// 형식 변환으로 만들 그림 수(고른 쪽, 안 골랐으면 전체 쪽)
+export function imageCount() {
+  return runnable('convert').reduce((a, it) => a + (it.range ? it.range.length : it.pages || 0), 0);
 }
 
 export function mergeName() {
@@ -65,8 +72,8 @@ export async function runAll() {
 
 async function runInner(mode, items) {
 
-  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만)
-  const wantEngine = items.some((it) => (mode === 'text' ? textNeedsEngine(it) : needsEngine(it)));
+  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만. 형식 변환은 PDF만이라 필요 없음)
+  const wantEngine = mode !== 'convert' && items.some((it) => (mode === 'text' ? textNeedsEngine(it) : needsEngine(it)));
   let enginePromise = null;
   if (wantEngine && !engineReady()) enginePromise = launchEngine();
 
@@ -95,8 +102,9 @@ async function runInner(mode, items) {
   abort = new AbortController();
   emit('running');
   for (const it of store.items) updateItem(it, { state: items.includes(it) ? 'queued' : 'idle', msg: '', progress: 0 });
-  let ok = 0, bad = 0;
+  let ok = 0, bad = 0, images = 0;
   const t0 = Date.now();
+  const doing = { pdf: 'PDF로 바꾸는 중', text: '글 뽑는 중', convert: '그림으로 바꾸는 중' }[mode];
   try {
     if (mode === 'merge') {
       const r = await mergeAll(items, session);
@@ -106,14 +114,20 @@ async function runInner(mode, items) {
       for (let i = 0; i < items.length; i++) {
         if (abort.signal.aborted) break;
         const it = items[i];
-        setStatus(`${i + 1}/${items.length} ${mode === 'pdf' ? 'PDF로 바꾸는 중' : '글 뽑는 중'}…`);
+        setStatus(`${i + 1}/${items.length} ${doing}…`);
         updateItem(it, { state: 'working', progress: 0, msg: '' });
         try {
-          const out = mode === 'pdf' ? await convertOne(it, session) : await textOne(it, session);
-          updateItem(it, { state: out.warn ? 'warn' : 'done', msg: out.warn || `저장: ${out.saved.name}`, progress: 1, output: out });
+          const out = mode === 'pdf' ? await convertOne(it, session) : mode === 'convert' ? await imagesOne(it, session) : await textOne(it, session);
+          updateItem(it, { state: out.warn ? 'warn' : 'done', msg: out.warn || out.msg || `저장: ${out.saved.name}`, progress: 1, output: out });
           ok++;
+          images += out.count || 0;
         } catch (e) {
-          if (e.code === 'cancelled' || abort.signal.aborted) { updateItem(it, { state: 'idle', msg: '' }); break; }
+          images += e.saved || 0;
+          if (e.code === 'cancelled' || abort.signal.aborted) {
+            // 그림으로 바꾸다 멈추면 그때까지 저장한 장 수를 남긴다
+            updateItem(it, e.saved ? { state: 'warn', msg: `중지 — ${fmtNum(e.saved)}장은 저장했습니다` } : { state: 'idle', msg: '' });
+            break;
+          }
           updateItem(it, { state: 'error', msg: failMsg(e) });
           bad++;
         }
@@ -126,8 +140,9 @@ async function runInner(mode, items) {
     const secs = Math.round((Date.now() - t0) / 1000);
     setStatus(abort.signal.aborted ? '중지했습니다' : `끝 · 성공 ${ok}${bad ? ` · 실패 ${bad}` : ''} · ${secs}초`);
     if (!abort.signal.aborted) {
-      const where = settings.save === 'download' ? '다운로드 폴더' : '';
-      if (ok && mode !== 'merge') toast(`${ok}개 저장했습니다${where ? ' (' + where + ')' : ''}`);
+      const where = settings.save === 'download' ? ' (다운로드 폴더)' : '';
+      if (mode === 'convert') { if (images) toast(`그림 ${fmtNum(images)}장을 저장했습니다${where}`); }
+      else if (ok && mode !== 'merge') toast(`${ok}개 저장했습니다${where}`);
       for (const n of session.notes) toast(n);
     }
     abort = null;
@@ -174,6 +189,62 @@ async function textOne(it, session) {
   if (store.items.length > 20 && store.selected !== it.id) updateItem(it, { textDoc: null, textKey: null });
   const warn = !text.trim() ? '뽑을 글이 없습니다' + (doc.warnings && doc.warnings[0] ? ` — ${doc.warnings[0]}` : '') : null;
   return { saved, blob, warn: warn ? `${warn} (저장: ${saved.name})` : null };
+}
+
+// 형식 변환: PDF 쪽 → 그림 파일(쪽마다 하나). 한 쪽씩 그려 바로 저장한다(쪽이 많아도 메모리에 쌓이지 않게).
+// 한 쪽을 못 그려도 나머지는 이어서 하고 끝에 알린다. 멈추거나 실패하면 그때까지 저장한 장 수를 오류에 붙인다(e.saved)
+async function imagesOne(it, session) {
+  const signal = abort.signal;
+  const ext = settings.convert.to === 'jpg' ? 'jpg' : 'png';
+  const dpi = settings.convert.dpi || 150;
+  const cancelled = () => Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
+  updateItem(it, { msg: 'PDF 여는 중' });
+  let hd;
+  try {
+    hd = await openThumbDoc(it.file, it.password);
+  } catch (e) {
+    if (e && e.name === 'PasswordException') {
+      updateItem(it, { needsPassword: true, password: null });
+      throw Object.assign(new Error(e.code === 2 ? '암호가 맞지 않습니다' : '열 때 암호가 필요한 PDF입니다'), { code: 'password' });
+    }
+    throw Object.assign(new Error('PDF를 열지 못했습니다(손상된 파일일 수 있습니다)'), { code: 'broken' });
+  }
+  const names = [], failed = [];
+  try {
+    const total = hd.pages;
+    if (!it.pages) updateItem(it, { pages: total, pageExact: true });
+    const pages = (it.range || Array.from({ length: total }, (_, i) => i + 1)).filter((n) => n >= 1 && n <= total);
+    if (!pages.length) throw Object.assign(new Error(`고른 쪽이 문서에 없습니다(전체 ${total}쪽)`), { code: 'range' });
+    let one = null, minDpi = dpi;
+    for (const n of pages) {
+      if (signal.aborted) throw cancelled();
+      updateItem(it, { msg: `${fmtNum(names.length + failed.length + 1)}/${fmtNum(pages.length)}장` });
+      let r;
+      try {
+        r = await renderPageImage(hd, n, { dpi, type: ext, signal });
+      } catch (e) {
+        if (e.code === 'cancelled' || signal.aborted) throw cancelled();
+        console.warn(`${n}쪽 그림 실패`, e);
+        failed.push(n);
+        continue;
+      }
+      const name = total > 1 ? `${baseName(it.name)} (${n}쪽).${ext}` : `${baseName(it.name)}.${ext}`;
+      names.push((await saveOutput(session, it, name, r.blob)).name);
+      if (r.lowered) minDpi = Math.min(minDpi, r.dpi);
+      if (pages.length === 1) one = r.blob;
+      updateItem(it, { progress: (names.length + failed.length) / pages.length });
+    }
+    if (!names.length) throw Object.assign(new Error(`쪽을 그리지 못했습니다(${formatRange(failed)}쪽)`), { code: 'render' });
+    let msg = `저장: ${names[0]}${names.length > 1 ? ` 외 ${fmtNum(names.length - 1)}장` : ''}`;
+    if (minDpi < dpi) msg += ` · 큰 쪽은 약 ${Math.floor(minDpi)}dpi로 낮춤`;
+    const warn = failed.length ? `${formatRange(failed)}쪽은 그리지 못했습니다 (${msg})` : null;
+    return { msg, warn, count: names.length, blob: one };
+  } catch (e) {
+    e.saved = names.length;
+    throw e;
+  } finally {
+    hd.close();
+  }
 }
 
 async function mergeAll(items, session) {

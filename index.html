@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DRE</title>
-<meta name="description" content="DRE(Document Reformatting Engine) — 한글·워드 문서를 PDF로, PDF·문서의 글을 TXT로, 여러 문서를 PDF 하나로">
+<meta name="description" content="DRE(Document Reformatting Engine) — 한글·워드 문서를 PDF로, PDF·문서의 글을 TXT로, 여러 문서를 PDF 하나로, PDF 쪽을 그림(PNG·JPG)으로">
 <meta name="theme-color" content="#2f54eb">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="64x64" href="icons/icon-64.png">
@@ -38,6 +38,7 @@
     <symbol id="i-merge" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="9" rx="1.2"/><rect x="14" y="4" width="7" height="9" rx="1.2"/><path d="M6.5 13v2.5h11V13M12 15.5V21M9.5 18.5L12 21l2.5-2.5"/></symbol>
     <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8.5 13.5h7M8.5 17h4.5"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-convert" viewBox="0 0 24 24"><path d="M4 8h15M15.5 4.5L19 8l-3.5 3.5"/><path d="M20 16H5M8.5 12.5L5 16l3.5 3.5"/></symbol>
   </defs>
 </svg>
 
@@ -47,6 +48,7 @@
     <button role="tab" data-mode="pdf"><svg class="ico"><use href="#i-pdf"/></svg>PDF로 변환</button>
     <button role="tab" data-mode="text"><svg class="ico"><use href="#i-text"/></svg>텍스트 추출</button>
     <button role="tab" data-mode="merge"><svg class="ico"><use href="#i-merge"/></svg>PDF 합치기</button>
+    <button role="tab" data-mode="convert"><svg class="ico"><use href="#i-convert"/></svg>형식 변환</button>
   </nav>
   <div class="grow"></div>
   <button id="engineChip" class="chip engine" data-state="checking" title="DRE"><span class="dot"></span><span class="label">DRE</span></button>

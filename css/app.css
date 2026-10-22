@@ -257,7 +257,8 @@ dialog::backdrop { background: rgba(10, 14, 24, .35); }
 @media (max-width: 560px) {
   .top { flex-wrap: wrap; padding: 7px 10px; }
   .modes { order: 3; width: 100%; }
-  .modes button { flex: 1; justify-content: center; }
+  /* 탭 넷이 한 줄에 들도록: 글자 폭만큼 나눠 갖고 낱말 중간에서 줄을 바꾸지 않는다 */
+  .modes button { flex: 1 1 auto; justify-content: center; padding: 0 4px; font-size: 12.5px; white-space: nowrap; }
   .actionbar { flex-wrap: wrap; }
   .file { flex-wrap: wrap; }
   .file .nm { flex-basis: 60%; }

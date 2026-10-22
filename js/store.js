@@ -10,7 +10,7 @@ let nextId = 1;
 export const store = {
   items: [],
   selected: null,       // 고른 항목 id
-  mode: settings.mode,  // pdf | text | merge
+  mode: settings.mode,  // pdf | text | merge | convert
   running: false,
 };
 

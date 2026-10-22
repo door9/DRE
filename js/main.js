@@ -5,13 +5,22 @@ import { setupList } from './ui/list.js';
 import { setupSide } from './ui/side.js';
 import { openSettings, engineChipSetup } from './ui/dialogs.js';
 import { setupDrop, pickFiles, pickFolder } from './intake.js';
-import { runAll, stopAll, runnable } from './run.js';
+import { runAll, stopAll, runnable, imageCount } from './run.js';
 import { watchEngine } from './engine.js';
 import { loadSavedFolder, savedFolderName, chooseFolder, canPickFolder } from './save.js';
-import { toast, local } from './util.js';
+import { toast, local, fmtNum } from './util.js';
 import { BUILD } from './version.js';
 
 const RUN_LABEL = { pdf: 'PDF로 변환', text: '텍스트 추출', merge: 'PDF로 합치기' };
+
+// 실행 단추 이름. 형식 변환은 바꿀 형식과 만들 그림 수('PNG로 변환 (12장)'), 나머지는 파일 수
+function runLabel(n) {
+  if (store.mode === 'convert') {
+    const k = imageCount();
+    return `${settings.convert.to === 'jpg' ? 'JPG' : 'PNG'}로 변환${k > 1 ? ` (${fmtNum(k)}장)` : ''}`;
+  }
+  return RUN_LABEL[store.mode] + (n > 1 && store.mode !== 'merge' ? ` (${n})` : '');
+}
 let loginAsked = false; // 로그인 만료 안내는 화면을 연 동안 한 번만
 
 function syncMode() {
@@ -27,7 +36,7 @@ function syncMode() {
 function syncRun() {
   const btn = document.getElementById('btnRun');
   const n = runnable(store.mode).length;
-  btn.textContent = RUN_LABEL[store.mode] + (n > 1 && store.mode !== 'merge' ? ` (${n})` : '');
+  btn.textContent = runLabel(n);
   btn.disabled = store.running || !n || (store.mode === 'merge' && n < 1);
   btn.hidden = store.running;
   document.getElementById('btnStop').hidden = !store.running;
@@ -74,6 +83,7 @@ async function main() {
   on('list', syncRun);
   on('item', syncRun);
   on('running', syncRun);
+  on('convert-opts', syncRun);
   syncMode();
 
   // 단축키: Ctrl+O 파일 추가, Ctrl+Enter 실행

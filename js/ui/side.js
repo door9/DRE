@@ -1,11 +1,11 @@
-// 오른쪽 패널 — 고른 파일의 쪽 고르기(쪽 그림), 글 미리 보기(텍스트 추출), 합칠 이름·책갈피(합치기)
+// 오른쪽 패널 — 고른 파일의 쪽 고르기(쪽 그림), 글 미리 보기(텍스트 추출), 합칠 이름·책갈피(합치기), 바꿀 형식·해상도(형식 변환)
 import { store, on, selectedItem, updateItem, emit } from '../store.js';
 import { settings, saveSettings, renderOptions } from '../settings.js';
 import { h, ico, esc, fmtNum, infoToggle, toast, debounce, baseName } from '../util.js';
 import { parseRange, formatRange, render } from '../core/model.js';
 import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, kindLabel } from '../core/detect.js';
 import { ensurePdf, ensureText } from '../produce.js';
-import { openThumbDoc, renderThumb } from '../thumbs.js';
+import { openThumbDoc, renderThumb, imageSize } from '../thumbs.js';
 import { engine, engineReady, launchEngine, onEngine } from '../engine.js';
 import { mergeName, runnable } from '../run.js';
 import { prepareSave, saveOutput, textBlob } from '../save.js';
@@ -146,8 +146,11 @@ function rangeSection(it, { open = true } = {}) {
     }
     if (current !== it) { hd.close(); return; }
     if (it.kind !== 'pdf' && it.pdfPages !== hd.pages) updateItem(it, { pdfPages: hd.pages, pages: hd.pages, pageExact: true });
+    // 암호 걸린 PDF 는 살펴보기 때 쪽 수를 몰랐다 — 암호로 연 지금 적어 둔다
+    if (it.kind === 'pdf' && !it.pages) updateItem(it, { pages: hd.pages, pageExact: true });
     showStatus();
     thumbState = { item: it, h: hd, renders: new Map(), observer: null };
+    if (store.mode === 'convert') showPixelSize();
     grid.innerHTML = '';
     const frag = document.createDocumentFragment();
     for (let p = 1; p <= hd.pages; p++) {
@@ -301,6 +304,49 @@ function mergeSection() {
   );
 }
 
+// ─── 형식 변환(PDF 쪽 → 그림) ───
+function convertBar() {
+  const c = settings.convert;
+  const seg = (key, opts) => {
+    const box = h('span.seg');
+    const paint = () => [...box.children].forEach((b, i) => b.setAttribute('aria-pressed', String(opts[i][0] === c[key])));
+    for (const [v, label] of opts) {
+      box.append(h('button', { type: 'button', text: label, onclick: () => { c[key] = v; saveSettings(); paint(); emit('convert-opts'); } }));
+    }
+    paint();
+    return box;
+  };
+  return h('div.textbar', { 'data-info-host': '' },
+    h('span.field', {}, h('span', { text: '바꿀 형식' }), seg('to', [['png', 'PNG'], ['jpg', 'JPG']])),
+    h('span.field', {}, h('span', { text: '해상도' }), seg('dpi', [[96, '96'], [150, '150'], [300, '300'], [600, '600']]), h('span.muted.small', { text: 'dpi' })),
+    h('span.stat.px-size'),
+    infoToggle(`<p><b>PNG</b>는 글자·표·선이 또렷하고, <b>JPG</b>는 사진이 많은 쪽에 알맞고 파일이 작습니다.</p>
+      <p><b>해상도</b>: 화면에서 보거나 메신저로 보낼 때는 150, 인쇄하거나 크게 확대해 볼 때는 300을 고르세요. 600은 파일이 아주 큽니다.</p>
+      <p>그림에 해상도를 적어 두므로 한글·워드에 넣으면 원래 종이 크기로 들어갑니다.</p>
+      <p>쪽마다 그림 파일 하나로 저장합니다(이름 뒤에 '(3쪽)'). 쪽을 고르지 않으면 모든 쪽을 바꿉니다.</p>`),
+  );
+}
+
+// 고른 첫 쪽이 몇 픽셀 그림이 될지(쪽 그림을 위해 열어 둔 PDF 로 잰다)
+async function showPixelSize() {
+  const el = side().querySelector('.px-size');
+  if (!el) return;
+  const it = current;
+  const st = thumbState;
+  if (!it || !st || st.item !== it) { el.textContent = ''; return; }
+  const n = it.range && it.range.length ? it.range[0] : 1;
+  const dpi = settings.convert.dpi;
+  try {
+    const page = await st.h.doc.getPage(n);
+    const vp = page.getViewport({ scale: 1 });
+    const s = imageSize(vp.width, vp.height, dpi);
+    if (thumbState !== st || settings.convert.dpi !== dpi || !el.isConnected) return;
+    el.textContent = `${n}쪽 ${fmtNum(s.width)}×${fmtNum(s.height)} 픽셀${s.lowered ? ` (쪽이 커서 약 ${Math.floor(s.dpi)}dpi로)` : ''}`;
+  } catch {
+    el.textContent = '';
+  }
+}
+
 // ─── 패널 그리기 ───
 export function renderSide() {
   const box = side();
@@ -317,6 +363,18 @@ export function renderSide() {
       body.append(rangeSection(it, { open: true }));
       box.append(body);
     }
+    return;
+  }
+  if (mode === 'convert') {
+    box.append(convertBar());
+    if (!it) {
+      box.append(h('div.side-note', { html: 'PDF의 쪽을 그림 파일(PNG·JPG)로 바꿉니다.<br>파일을 고르면 쪽을 골라 바꿀 수 있습니다.' }));
+      return;
+    }
+    box.append(h('div.side-head', {}, h('h2', { text: it.name, title: it.name })));
+    const body = h('div.side-body');
+    body.append(it.kind === 'pdf' ? rangeSection(it, { open: true }) : h('div.side-note.small', { text: 'PDF만 그림으로 바꿀 수 있습니다.' }));
+    box.append(body);
     return;
   }
   if (!it) {
@@ -366,7 +424,9 @@ export function setupSide() {
       const head = side().querySelector('.side-body .row.muted');
       if (head) renderSide();
     }
+    if (store.mode === 'convert') showPixelSize();
   });
+  on('convert-opts', showPixelSize);
   on('list', () => { if (store.mode === 'merge' || !selectedItem() || selectedItem() !== current) renderSide(); });
   on('item', (it) => {
     // 형식·쪽 수를 알아낸 뒤 패널을 한 번 다시 그린다

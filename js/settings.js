@@ -2,7 +2,7 @@
 import { local } from './util.js';
 
 const DEFAULTS = {
-  mode: 'pdf',
+  mode: 'pdf',             // pdf | text | merge | convert
   save: 'download',
   text: {
     reflow: true,          // 줄 이어 붙이기
@@ -17,6 +17,7 @@ const DEFAULTS = {
   eol: 'crlf',             // 줄 끝: crlf(윈도우) | lf
   bom: true,               // UTF-8 표시(BOM) — 한글·메모장 등에서 글자가 안 깨지게
   merge: { outline: true },
+  convert: { to: 'png', dpi: 150 }, // 형식 변환: 바꿀 형식(png | jpg)·해상도(dpi)
   theme: 'auto',
 };
 
