@@ -6,6 +6,7 @@ import { settings } from './settings.js';
 import { OFFICE, IMAGES, TEXTABLE, SHEETS, SLIDES, ENGINE_PDF, engineExt, kindLabel } from './core/detect.js';
 import { pageLines, linesText, applyFixes } from './core/aifix.js';
 import { baseName, extOf } from './util.js';
+import { unzipSync, strFromU8 } from '../vendor/fflate.mjs';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
 
@@ -71,6 +72,24 @@ export async function ensurePdf(it, { signal, onState } = {}) {
     updateItem(it, { pdf });
     return pdf;
   });
+}
+
+// 파워포인트가 직접 그린 슬라이드를 받을 수 있나(옛 DRE 는 못 한다 — 그때는 PDF 를 거친다)
+export const canSlideImages = (it) => SLIDES.has(it.kind) && engineReady() && !!engine.slides && engineCan(it.kind);
+
+// 슬라이드 몇 장을 그림으로 받는다. pages: 보이는 슬라이드 차례(PDF 쪽 번호와 같다).
+// 돌려주는 것: { total: 보이는 슬라이드 수, dpi: 실제 해상도, image(n): 그 쪽 PNG 바이트 }
+export async function slideImages(it, { dpi, pages, signal, onState } = {}) {
+  if (onState) onState('engine-wait');
+  const zip = await engineTask(async () => {
+    if (signal && signal.aborted) throw fail('cancelled', '취소했습니다');
+    if (onState) onState('engine');
+    return engineConvert(it.file, engineName(it), 'slides', { signal, query: `&dpi=${dpi}&pages=${pages.join(',')}` });
+  });
+  const files = unzipSync(new Uint8Array(await zip.arrayBuffer()));
+  if (!files['manifest.json']) throw fail('engine_error', 'DRE가 슬라이드 그림을 돌려주지 않았습니다');
+  const info = JSON.parse(strFromU8(files['manifest.json']));
+  return { ...info, image: (n) => files[`${n}.png`] };
 }
 
 // DRE.exe로 PDF를 만들어 그 PDF에서 뽑을 수 있나

@@ -922,7 +922,7 @@ namespace Dre
             return "{\"app\":\"DRE\",\"version\":\"" + Program.Version + "\",\"port\":" + Port +
                 ",\"apps\":{\"hwp\":" + B(c.Has("hwp")) + ",\"word\":" + B(c.Has("word")) + ",\"excel\":" + B(c.Has("excel")) + ",\"powerpoint\":" + B(c.Has("powerpoint")) +
                 ",\"browser\":" + B(c.Has("browser")) + "}" + ",\"browserName\":\"" + Json(c.Has("browser") ? Browser.Name : "") + "\"" +
-                ",\"busy\":" + B(c.Busy) + ",\"queue\":" + c.QueueLength + ",\"ai\":" + B(Ai.Exe() != null) + "}";
+                ",\"busy\":" + B(c.Busy) + ",\"queue\":" + c.QueueLength + ",\"ai\":" + B(Ai.Exe() != null) + ",\"slides\":true}";
         }
         static string B(bool b) { return b ? "true" : "false"; }
 
@@ -969,10 +969,10 @@ namespace Dre
                         fs.Write(buf, 0, n); left -= n;
                     }
                 }
-                string outExt = to == "txt" ? "txt" : to;
+                string outExt = to == "txt" ? "txt" : to == "slides" ? "zip" : to;
                 string dst = Path.Combine(dir, "out_" + Path.GetFileNameWithoutExtension(name) + "." + outExt);
                 Program.LastWork = DateTime.Now;
-                var job = Program.Conv.Enqueue(src, dst, ext, to, clen);
+                var job = Program.Conv.Enqueue(src, dst, ext, to, clen, ParseDpi(req.Q("dpi")), ParsePages(req.Q("pages")));
                 // 브라우저 쪽이 끊으면(사용자가 중지) 그 일을 취소한다
                 while (!job.Done.WaitOne(500))
                 {
@@ -990,7 +990,7 @@ namespace Dre
                 h["X-DRE-App"] = job.UsedApp ?? "";
                 h["X-DRE-Ms"] = ((int)job.Elapsed.TotalMilliseconds).ToString();
                 h["Access-Control-Expose-Headers"] = "X-DRE-App, X-DRE-Ms";
-                string ctype = to == "pdf" ? "application/pdf" : to == "txt" ? "text/plain; charset=utf-16" : "application/octet-stream";
+                string ctype = to == "pdf" ? "application/pdf" : to == "txt" ? "text/plain; charset=utf-16" : to == "slides" ? "application/zip" : "application/octet-stream";
                 SendFile(ns, dst, ctype, h);
             }
             finally
@@ -1010,6 +1010,26 @@ namespace Dre
         {
             long n;
             return long.TryParse(req.Header("Content-Length") ?? "", out n) && n > 0 ? n : 0;
+        }
+
+        // 슬라이드 그림 요청의 해상도(앱의 선택지 안에서만)
+        static int ParseDpi(string s)
+        {
+            int d;
+            return int.TryParse(s ?? "", out d) && d >= 36 && d <= 1200 ? d : 150;
+        }
+
+        // '1,5,9' → 보이는 슬라이드 차례. 없으면 null(전체)
+        static HashSet<int> ParsePages(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            var set = new HashSet<int>();
+            foreach (string p in s.Split(','))
+            {
+                int n;
+                if (int.TryParse(p, out n) && n >= 1) set.Add(n);
+            }
+            return set.Count > 0 ? set : null;
         }
 
         // AI 교정: 본문 = { text: 줄번호 붙은 인식 결과, images: [{ label, type, data(base64) }] }. 지시문·답 꼴은 Ai 가 정한다
@@ -1177,6 +1197,8 @@ namespace Dre
     {
         public string Src, Dst, Ext, To, UsedApp, Error, ErrorCode;
         public long Size;
+        public int Dpi = 150;           // to=slides: 해상도
+        public HashSet<int> Pages;      // to=slides: 보이는 슬라이드 차례(null 이면 전체)
         public DateTime Started;
         public TimeSpan Elapsed;
         public volatile bool Cancelled, TimedOut;
@@ -1338,7 +1360,7 @@ namespace Dre
 
         public string Unsupported(string ext, string to)
         {
-            if (to != "pdf" && to != "docx" && to != "hwpx" && to != "txt") return "알 수 없는 변환 형식입니다";
+            if (to != "pdf" && to != "docx" && to != "hwpx" && to != "txt" && to != "slides") return "알 수 없는 변환 형식입니다";
             string app = Pick(ext);
             if (app == null)
             {
@@ -1353,6 +1375,7 @@ namespace Dre
             if (to == "hwpx" && app != "hwp") return "HWPX로는 한글 문서만 바꿀 수 있습니다";
             if (to == "docx" && app != "word") return "DOCX로는 워드 문서만 바꿀 수 있습니다";
             if (to == "txt" && app != "hwp" && app != "word") return "글자 파일로는 한글·워드 문서만 바꿀 수 있습니다";
+            if (to == "slides" && app != "powerpoint") return "슬라이드 그림은 파워포인트 문서만 만들 수 있습니다";
             return null;
         }
 
@@ -1367,9 +1390,9 @@ namespace Dre
             wd.Start();
         }
 
-        public Job Enqueue(string src, string dst, string ext, string to, long size)
+        public Job Enqueue(string src, string dst, string ext, string to, long size, int dpi = 150, HashSet<int> pages = null)
         {
-            var j = new Job { Src = src, Dst = dst, Ext = ext, To = to, Size = size };
+            var j = new Job { Src = src, Dst = dst, Ext = ext, To = to, Size = size, Dpi = dpi, Pages = pages };
             lock (gate) queue.Enqueue(j);
             signal.Set();
             return j;
@@ -1755,11 +1778,67 @@ namespace Dre
                         throw new ConvertError("password", "암호가 걸린 문서입니다");
                     throw new ConvertError("open_failed", "파워포인트가 문서를 열지 못했습니다: " + Short(m));
                 }
-                pres.SaveAs(j.Dst, 32); // ppSaveAsPDF
+                if (j.To == "slides") { ExportSlides(pres, j); return; }
+                try { pres.SaveAs(j.Dst, 32); } // ppSaveAsPDF
+                catch (COMException)
+                {
+                    // 박힌 글꼴에 사용 제한이 있는 문서 등은 파워포인트가 수정 불가로 연다 — 슬라이드 내보내기만 되고 저장은 어떤 명령으로도 안 된다
+                    // (실측 2026-11-06: SaveAs·SaveCopyAs·ExportAsFixedFormat 모두 실패). Saved 를 건드려 보면 그 상태를 가릴 수 있다
+                    bool locked = false;
+                    try { pres.Saved = -1; } catch (COMException) { locked = true; }
+                    if (locked) throw new ConvertError("failed", "파워포인트가 이 문서를 수정 불가 상태로 열어 PDF로 저장하지 못합니다(문서에 박힌 글꼴의 사용 제한일 수 있습니다). 형식 변환 탭에서 그림으로는 바꿀 수 있습니다");
+                    throw;
+                }
             }
             finally
             {
                 if (pres != null) { try { pres.Close(); } catch { } try { Marshal.FinalReleaseComObject(pres); } catch { } }
+            }
+        }
+
+        // 슬라이드를 파워포인트가 직접 그림으로 내보낸다. PDF 를 거치면 글꼴에 없는 글자를 대신 그려 주지 않아 네모로 나오고(실측: 바탕 글꼴의 주역 괘 기호),
+        // PDF 저장 자체가 실패하는 문서도 있다. 숨긴 슬라이드는 PDF 처럼 빼고 세므로 쪽 번호가 PDF 와 같다.
+        // 결과: ZIP = manifest.json({ total: 보이는 슬라이드 수, width·height: 그림 화소, dpi: 실제 해상도 }) + '번호.png'
+        void ExportSlides(dynamic pres, Job j)
+        {
+            double sw = pres.PageSetup.SlideWidth, sh = pres.PageSetup.SlideHeight;
+            // 앱과 같은 상한(thumbs.js imageSize: 긴 변 16000, 4천만 화소)
+            double scale = j.Dpi / 72.0;
+            double k = Math.Min(1, Math.Min(16000 / Math.Max(sw * scale, sh * scale), Math.Sqrt(40e6 / (sw * sh * scale * scale))));
+            scale *= k;
+            int w = Math.Max(1, (int)Math.Round(sw * scale)), h = Math.Max(1, (int)Math.Round(sh * scale));
+            string dir = Path.Combine(Path.GetDirectoryName(j.Dst), "slides");
+            Directory.CreateDirectory(dir);
+            var made = new List<KeyValuePair<int, string>>();
+            int visible = 0, count = pres.Slides.Count;
+            for (int i = 1; i <= count; i++)
+            {
+                if (j.Cancelled || j.TimedOut) return;
+                dynamic s = pres.Slides.Item(i);
+                try
+                {
+                    if ((int)s.SlideShowTransition.Hidden != 0) continue;
+                    visible++;
+                    if (j.Pages != null && !j.Pages.Contains(visible)) continue;
+                    string f = Path.Combine(dir, visible + ".png");
+                    s.Export(f, "PNG", w, h);
+                    made.Add(new KeyValuePair<int, string>(visible, f));
+                }
+                finally { try { Marshal.FinalReleaseComObject(s); } catch { } }
+            }
+            using (var fs = new FileStream(j.Dst, FileMode.CreateNew, FileAccess.Write))
+            using (var za = new ZipArchive(fs, ZipArchiveMode.Create))
+            {
+                var info = za.CreateEntry("manifest.json", CompressionLevel.NoCompression);
+                using (var o = new StreamWriter(info.Open(), new UTF8Encoding(false)))
+                    o.Write("{\"total\":" + visible + ",\"width\":" + w + ",\"height\":" + h + ",\"dpi\":" +
+                        (scale * 72).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "}");
+                foreach (var m in made)
+                {
+                    var e = za.CreateEntry(m.Key + ".png", CompressionLevel.NoCompression); // PNG 는 이미 압축돼 있다
+                    using (var o = e.Open())
+                    using (var i = File.OpenRead(m.Value)) i.CopyTo(o);
+                }
             }
         }
 

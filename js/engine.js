@@ -34,8 +34,8 @@ export function checkEngine({ quiet = false } = {}) {
       try {
         const j = await ping(p);
         local.set('engineSeen', true);
-        // ai: 이 PC 에서 Claude Code 를 찾았나(옛 DRE 는 이 값이 없다 — AI 교정을 못 한다)
-        set({ status: 'on', port: p, apps: j.apps || {}, browserName: j.browserName || '', version: j.version, busy: !!j.busy, ai: 'ai' in j ? !!j.ai : null });
+        // ai: 이 PC 에서 Claude Code 를 찾았나(옛 DRE 는 이 값이 없다 — AI 교정을 못 한다). slides: 슬라이드를 직접 그림으로 내보낼 수 있나(옛 DRE 는 없다)
+        set({ status: 'on', port: p, apps: j.apps || {}, browserName: j.browserName || '', version: j.version, busy: !!j.busy, ai: 'ai' in j ? !!j.ai : null, slides: !!j.slides });
         return true;
       } catch { /* 다음 자리 */ }
     }
@@ -77,14 +77,14 @@ export function engineCan(kind) {
   return false;
 }
 
-// 변환: blob → PDF(또는 to 형식) Blob. signal 로 중지하면 DRE.exe도 그 일을 버린다
-export async function engineConvert(blob, name, to = 'pdf', { signal } = {}) {
+// 변환: blob → PDF(또는 to 형식) Blob. signal 로 중지하면 DRE.exe도 그 일을 버린다. query: 주소에 덧붙일 것(슬라이드 그림의 해상도·쪽)
+export async function engineConvert(blob, name, to = 'pdf', { signal, query = '' } = {}) {
   if (engine.status !== 'on') await checkEngine({ quiet: true });
   if (engine.status !== 'on') throw Object.assign(new Error('DRE가 꺼져 있습니다'), { code: 'engine_off' });
   set({ busy: true });
   let r;
   try {
-    r = await fetch(`${hostFor(engine.port)}/v1/convert?to=${encodeURIComponent(to)}&name=${encodeURIComponent(name)}`, {
+    r = await fetch(`${hostFor(engine.port)}/v1/convert?to=${encodeURIComponent(to)}&name=${encodeURIComponent(name)}${query}`, {
       method: 'POST', body: blob, headers: { 'Content-Type': 'application/octet-stream' }, signal, cache: 'no-store',
     });
   } catch (e) {

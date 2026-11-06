@@ -129,6 +129,23 @@ async function encodeCanvas(canvas, type, dpi, quality, signal) {
   return new Blob([setImageDpi(new Uint8Array(await blob.arrayBuffer()), dpi)], { type: mime });
 }
 
+// 다른 프로그램이 그려 준 PNG(파워포인트가 직접 그린 슬라이드) → 그림 파일. PNG 는 다시 만들지 않고 해상도만 적고, 다른 형식은 그림판에 옮겨 같은 길로 만든다
+export async function imageFromPng(bytes, { dpi, type = 'png', quality = 0.92, signal = null } = {}) {
+  if (type === 'png') return new Blob([setImageDpi(bytes, dpi)], { type: 'image/png' });
+  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+  const canvas = document.createElement('canvas');
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  try {
+    const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: type === 'tif' });
+    ctx.drawImage(bmp, 0, 0);
+    return await encodeCanvas(canvas, type, dpi, quality, signal);
+  } finally {
+    bmp.close();
+    canvas.width = canvas.height = 0;
+  }
+}
+
 // 쪽 하나를 그림 파일로. type: IMAGE_FORMATS 의 값. 돌려주는 것: { blob, width, height, dpi, lowered }
 export async function renderPageImage(h, pageNo, { dpi = 150, type = 'png', quality = 0.92, signal = null } = {}) {
   const pdfjs = await lib();

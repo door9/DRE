@@ -1,13 +1,13 @@
 // 실행 — 고른 할 일(PDF로 변환 / 텍스트 추출 / PDF 합치기 / 형식 변환)을 목록 차례대로 처리하고 저장한다
 import { store, updateItem, emit } from './store.js';
 import { settings, renderOptions } from './settings.js';
-import { ensurePdf, ensureText, needsEngine, textNeedsEngine } from './produce.js';
+import { ensurePdf, ensureText, needsEngine, textNeedsEngine, canSlideImages, slideImages } from './produce.js';
 import { runJob, cancelAll } from './jobs.js';
 import { prepareSave, saveOutput, textBlob } from './save.js';
 import { render, formatRange } from './core/model.js';
 import { engine, engineReady, launchEngine, engineCan } from './engine.js';
 import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF, TO_IMAGE, SHEETS, SLIDES } from './core/detect.js';
-import { openThumbDoc, renderPageImage, IMAGE_FORMATS } from './thumbs.js';
+import { openThumbDoc, renderPageImage, imageFromPng, IMAGE_FORMATS } from './thumbs.js';
 import { baseName, fmtNum, toast } from './util.js';
 
 let abort = null;
@@ -212,6 +212,63 @@ function pdfMaker(it) {
   return engine.apps && engine.apps.word === false ? '한글로' : '워드로';
 }
 
+const cancelled = () => Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
+
+// 그림을 다 저장한 뒤 항목에 보일 글
+function imagesDone({ names, failed = [], missing = [], total, dpi, minDpi, sheetsPicked = 0, one = null }) {
+  let msg = `저장: ${names[0]}${names.length > 1 ? ` 외 ${fmtNum(names.length - 1)}장` : ''}`;
+  if (minDpi < dpi) msg += ` · 큰 쪽은 약 ${Math.floor(minDpi)}dpi로 낮춤`;
+  const warn = failed.length ? `${formatRange(failed)}쪽은 그리지 못했습니다 (${msg})`
+    : missing.length ? `${formatRange(missing)}쪽은 문서에 없어 건너뛰었습니다(전체 ${total}쪽) (${msg})`
+      : sheetsPicked && sheetsPicked !== total ? `시트 번호가 아니라 인쇄 쪽 번호로 골랐습니다(시트 ${sheetsPicked}개, 전체 ${total}쪽) (${msg})` : null;
+  return { msg, warn, count: names.length, blob: one };
+}
+
+// 파워포인트 문서: 파워포인트가 직접 그린 슬라이드를 받아 저장한다. PDF 를 거치면 글꼴에 없는 글자가 네모로 나오고(바탕 글꼴의 주역 괘 기호 실측)
+// PDF 저장에 실패하는 문서도 있다. 몇 장씩 나눠 받아 메모리에 쌓이지 않고 진행도 보이게 한다.
+// 아무것도 저장하기 전에 실패하면 imagesOne 이 PDF 길로 돌아간다(e.saved 로 가린다)
+async function slidesOne(it, session, ext, dpi) {
+  const signal = abort.signal;
+  const size = dpi >= 600 ? 4 : dpi >= 300 ? 10 : 20;
+  const upTo = (n) => Array.from({ length: n }, (_, i) => i + 1);
+  let want = it.range || upTo(it.pages || size);
+  let missing = [], total = null, minDpi = dpi, one = null;
+  const names = [];
+  const onState = (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : `${pdfMaker(it)} 그림 만드는 중 (${fmtNum(names.length)}/${fmtNum(want.length)}장)` });
+  try {
+    while (names.length < want.length) {
+      const part = want.slice(names.length, names.length + size);
+      const r = await slideImages(it, { dpi, pages: part, signal, onState });
+      if (total === null) {
+        total = r.total;
+        if (it.pages !== total || !it.pageExact) updateItem(it, { pages: total, pageExact: true });
+        // 쪽을 안 골랐으면 실제 장 수만큼, 골랐으면 있는 쪽만
+        missing = want.filter((n) => n > total);
+        want = it.range ? want.filter((n) => n <= total) : upTo(total);
+        if (!want.length) throw Object.assign(new Error(`고른 쪽이 문서에 없습니다(전체 ${total}쪽)`), { code: 'range' });
+      }
+      for (const n of part) {
+        if (n > total) continue;
+        if (signal.aborted) throw cancelled();
+        const png = r.image(n);
+        if (!png) throw Object.assign(new Error(`${n}쪽 그림을 받지 못했습니다`), { code: 'render' });
+        // 파워포인트가 요청보다 작은 그림을 주어도 해상도를 사실대로 적는다(PNG 머리의 실제 가로 화소로)
+        const real = (r.dpi * new DataView(png.buffer, png.byteOffset + 16, 4).getUint32(0)) / r.width;
+        if (real < minDpi) minDpi = real;
+        const blob = await imageFromPng(png, { dpi: real, type: ext, signal });
+        const name = total > 1 ? `${baseName(it.name)} (${n}쪽).${ext}` : `${baseName(it.name)}.${ext}`;
+        names.push((await saveOutput(session, it, name, blob)).name);
+        if (want.length === 1) one = blob;
+        updateItem(it, { msg: `${fmtNum(names.length)}/${fmtNum(want.length)}장`, progress: names.length / want.length });
+      }
+    }
+    return imagesDone({ names, missing: it.range ? missing : [], total, dpi, minDpi, one });
+  } catch (e) {
+    e.saved = names.length;
+    throw e;
+  }
+}
+
 // 형식 변환: PDF 쪽 → 그림 파일(쪽마다 하나). 한 쪽씩 그려 바로 저장한다(쪽이 많아도 메모리에 쌓이지 않게).
 // PDF 가 아닌 문서는 DRE.exe 가 이 PC 의 한글·워드·엑셀·파워포인트(전자책은 엣지)로 만든 PDF 에서 그린다(쪽 그림을 볼 때 만든 PDF 가 있으면 그것을 다시 쓴다).
 // 한 쪽을 못 그려도 나머지는 이어서 하고 끝에 알린다. 멈추거나 실패하면 그때까지 저장한 장 수를 오류에 붙인다(e.saved)
@@ -219,8 +276,15 @@ async function imagesOne(it, session) {
   const signal = abort.signal;
   const ext = IMAGE_FORMATS[settings.convert.to] ? settings.convert.to : 'png';
   const dpi = settings.convert.dpi || 150;
-  const cancelled = () => Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
   const isPdf = it.kind === 'pdf';
+  if (canSlideImages(it)) {
+    try {
+      return await slidesOne(it, session, ext, dpi);
+    } catch (e) {
+      if (e.code === 'cancelled' || signal.aborted || e.saved) throw e;
+      console.warn('슬라이드를 직접 받지 못해 PDF 를 거칩니다', e);
+    }
+  }
   // 엑셀은 PDF 를 만들기 전까지 시트 번호로 고른다 — 한 시트가 여러 쪽이면 번호가 어긋나므로 끝에 알린다
   const sheetsPicked = it.range && it.sheetPages && !it.pdfPages ? it.pages : 0;
   let src = it.file;
@@ -269,12 +333,7 @@ async function imagesOne(it, session) {
       updateItem(it, { progress: (names.length + failed.length) / pages.length });
     }
     if (!names.length) throw Object.assign(new Error(`쪽을 그리지 못했습니다(${formatRange(failed)}쪽)`), { code: 'render' });
-    let msg = `저장: ${names[0]}${names.length > 1 ? ` 외 ${fmtNum(names.length - 1)}장` : ''}`;
-    if (minDpi < dpi) msg += ` · 큰 쪽은 약 ${Math.floor(minDpi)}dpi로 낮춤`;
-    const warn = failed.length ? `${formatRange(failed)}쪽은 그리지 못했습니다 (${msg})`
-      : missing.length ? `${formatRange(missing)}쪽은 문서에 없어 건너뛰었습니다(전체 ${total}쪽) (${msg})`
-        : sheetsPicked && sheetsPicked !== total ? `시트 번호가 아니라 인쇄 쪽 번호로 골랐습니다(시트 ${sheetsPicked}개, 전체 ${total}쪽) (${msg})` : null;
-    return { msg, warn, count: names.length, blob: one };
+    return imagesDone({ names, failed, missing, total, dpi, minDpi, sheetsPicked, one });
   } catch (e) {
     e.saved = names.length;
     throw e;

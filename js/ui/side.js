@@ -4,7 +4,7 @@ import { settings, saveSettings, renderOptions } from '../settings.js';
 import { h, ico, esc, fmtNum, infoToggle, toast, debounce, baseName } from '../util.js';
 import { parseRange, formatRange, render } from '../core/model.js';
 import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, TO_IMAGE, kindLabel } from '../core/detect.js';
-import { ensurePdf, ensureText } from '../produce.js';
+import { ensurePdf, ensureText, canSlideImages } from '../produce.js';
 import { openThumbDoc, renderThumb, imageSize, IMAGE_FORMATS } from '../thumbs.js';
 import { engine, engineReady, launchEngine, onEngine, aiLogin } from '../engine.js';
 import { mergeName, runnable } from '../run.js';
@@ -124,7 +124,8 @@ function rangeSection(it, { open = true } = {}) {
         src = await ensurePdf(it);
       } catch (e) {
         if (current !== it) return;
-        note.textContent = e.message;
+        // PDF 저장에 실패하는 발표 문서도 그림으로는 바꿀 수 있다(파워포인트가 슬라이드를 직접 내보냄)
+        note.textContent = store.mode === 'convert' && canSlideImages(it) ? '쪽 그림을 보여 주지 못했습니다. 쪽 번호를 칸에 적어 고르면 그대로 변환됩니다.' : e.message;
         return;
       }
       if (current !== it) return;
@@ -355,7 +356,9 @@ function convertBar() {
     h('span.stat.px-size'),
     infoToggle(`<p><b>□ 바꿀 수 있는 문서</b><br>
       · PDF·한글·워드·엑셀·파워포인트·RTF·ODT·전자책(EPUB)<br>
-      · PDF가 아닌 문서는 DRE가 이 PC의 프로그램으로 PDF를 만든 뒤 그 쪽을 그림(DRE를 켜 두어야 함)<br>
+      · 파워포인트 문서는 파워포인트가 슬라이드를 직접 그림으로 내보냄<br>
+      · 그 밖의 문서는 이 PC의 프로그램으로 PDF를 만든 뒤 그 쪽을 그림<br>
+      · PDF가 아닌 문서는 DRE를 켜 두어야 함<br>
       · 엑셀은 인쇄할 때의 쪽 나눔대로, 전자책은 A4 쪽으로 나뉨</p>
       <p><b>□ 그림 형식</b><br>
       · PNG: 글자·표·선이 또렷함<br>
