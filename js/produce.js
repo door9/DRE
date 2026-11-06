@@ -3,7 +3,7 @@ import { runJob } from './jobs.js';
 import { engine, engineConvert, engineReady, engineCan, checkEngine, aiStatus, aiFix } from './engine.js';
 import { updateItem } from './store.js';
 import { settings } from './settings.js';
-import { OFFICE, IMAGES, TEXTABLE, SHEETS, SLIDES, ENGINE_PDF, engineExt } from './core/detect.js';
+import { OFFICE, IMAGES, TEXTABLE, SHEETS, SLIDES, ENGINE_PDF, engineExt, kindLabel } from './core/detect.js';
 import { pageLines, linesText, applyFixes } from './core/aifix.js';
 import { baseName, extOf } from './util.js';
 
@@ -50,7 +50,7 @@ export async function ensurePdf(it, { signal, onState } = {}) {
   if (!ENGINE_PDF.has(it.kind)) throw fail('unsupported', '이 형식은 PDF로 바꿀 수 없습니다');
   const ebook = it.kind === 'epub';
   if (!engineReady()) await checkEngine({ quiet: true });
-  if (!engineReady()) throw fail('engine_off', ebook ? '전자책을 PDF로 바꾸려면 DRE가 켜져 있어야 합니다' : '한글·워드 문서를 PDF로 바꾸려면 DRE가 켜져 있어야 합니다');
+  if (!engineReady()) throw fail('engine_off', `${ebook ? '전자책을' : `${kindLabel(it.kind)} 문서를`} PDF로 바꾸려면 DRE가 켜져 있어야 합니다`);
   // 전자책 인쇄는 새 판 DRE 부터(옛 판은 상태에 browser 가 없다)
   if (ebook && !('browser' in (engine.apps || {}))) throw fail('engine_old', '설치된 DRE가 옛 판이라 전자책을 PDF로 바꿀 수 없습니다. DRE를 새로 내려받아 설치해 주세요');
   if (!engineCan(it.kind)) throw fail('no_app', ebook ? '이 PC에 엣지·크롬이 없어 전자책을 PDF로 바꿀 수 없습니다' : '이 PC에 이 문서를 열 프로그램이 없습니다');

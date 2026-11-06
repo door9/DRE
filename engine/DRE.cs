@@ -1198,6 +1198,7 @@ namespace Dre
         public dynamic App { get { return AppObj; } }
         public int Pid;          // 우리가 띄운 프로세스(남이 쓰던 것에 붙었다면 0)
         public bool Shared;      // 이미 사용자가 쓰던 프로그램에 붙었는가(그러면 끄거나 죽이지 않는다)
+        public int ClosingPid;   // 우리가 끄라고 한 프로세스(다 꺼지기 전에는 새로 띄우지 않는다 — WaitClosing)
         public DateTime LastUsed;
         public bool Dead;
 
@@ -1209,8 +1210,9 @@ namespace Dre
         {
             var t = Type.GetTypeFromProgID(ProgId);
             if (t == null) throw new ConvertError("no_app", AppName(Kind) + " 프로그램이 이 PC에 없습니다");
+            WaitClosing();
             var before = Pids();
-            AppObj = Activator.CreateInstance(t);
+            AppObj = CreateApp(t);
             Dead = false;
             Pid = 0; Shared = true;
             for (int i = 0; i < 20 && Pid == 0; i++)
@@ -1221,6 +1223,35 @@ namespace Dre
             Shared = Pid == 0;
             LastUsed = DateTime.Now;
             Log.Write(Kind + " 띄움 pid=" + Pid + (Shared ? " (이미 켜진 것에 붙음)" : ""));
+        }
+
+        // 쉬어서 닫은 프로그램이 다 꺼질 때까지 기다린다(8초 안에 안 꺼지면 CloseSession 이 강제로 끈다).
+        // 꺼지는 중인 프로세스도 잠깐은 새 요청을 받아서, 거기 붙으면 강제 종료될 때 '서버를 사용할 수 없습니다'로 실패한다
+        // (실측 2026-11-06: 한글 → 워드 → 한글 순서의 묶음에서 쉬던 한글을 닫은 지 몇 초 뒤 다음 한글 문서가 도착)
+        void WaitClosing()
+        {
+            int pid = ClosingPid;
+            ClosingPid = 0;
+            if (pid == 0) return;
+            try { using (var p = Process.GetProcessById(pid)) p.WaitForExit(12000); }
+            catch { } // 이미 꺼졌으면 프로세스를 찾지 못한다
+        }
+
+        // 프로그램이 꺼지거나 막 뜨는 사이의 일시적인 실패만 다시 해 본다(프로그램이 없거나 고장 난 경우는 바로 알린다)
+        object CreateApp(Type t)
+        {
+            for (int tries = 1; ; tries++)
+            {
+                try { return Activator.CreateInstance(t); }
+                catch (COMException e)
+                {
+                    uint hr = (uint)e.ErrorCode;
+                    bool again = hr == 0x800706BA || hr == 0x800706BE || hr == 0x800706BF || hr == 0x80010108 || hr == 0x80080005;
+                    if (!again || tries >= 3) throw;
+                    Log.Write(Kind + " 띄우기 다시 시도 " + hr.ToString("X8"));
+                    Thread.Sleep(2000);
+                }
+            }
         }
 
         HashSet<int> Pids()
@@ -1235,6 +1266,7 @@ namespace Dre
             Dead = true;
             if (Pid != 0 && !Shared)
             {
+                ClosingPid = Pid;
                 try { using (var p = Process.GetProcessById(Pid)) p.Kill(); Log.Write(Kind + " 강제 종료 pid=" + Pid); } catch { }
             }
         }
@@ -1842,6 +1874,7 @@ namespace Dre
             Log.Write(s.Kind + (handedOver ? " 사용자에게 넘김" : " 닫음"));
             if (!handedOver && !shared && pid != 0)
             {
+                s.ClosingPid = pid;
                 // 몇 초 안에 안 꺼지면 강제로 끈다(우리가 띄운 것만)
                 ThreadPool.QueueUserWorkItem(delegate
                 {

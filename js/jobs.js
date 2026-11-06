@@ -72,7 +72,7 @@ function pump() {
   }
 }
 
-// type: 'probe' | 'extract' | 'build' | 'image'. transfer 로 넘긴 버퍼는 이쪽에서 더 못 쓴다.
+// type: 'probe' | 'extract' | 'build' | 'image' | 'tiff' 등(worker/task.js handlers). transfer 로 넘긴 버퍼는 이쪽에서 더 못 쓴다.
 export function runJob(type, payload, { transfer = [], onProgress, timeoutMs = 15 * 60 * 1000, front = false } = {}) {
   const job = { id: ++seq, type, payload, transfer, onProgress, timeoutMs };
   const promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });

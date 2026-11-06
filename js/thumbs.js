@@ -1,7 +1,12 @@
 // 쪽 그림(썸네일) — 화면에 보이는 쪽만 하나씩 작게 그린다. 1분 쓰지 않으면 PDF 해석기를 내린다.
-// 형식 변환(PDF 쪽 → PNG·JPG)도 여기서 그린다: 작업 스레드에는 화면이 없어 색 거르기(SVG 필터 — 투명 가리개의 전달 함수)와
+// 형식 변환(PDF 쪽 → 그림 파일)도 여기서 그린다: 작업 스레드에는 화면이 없어 색 거르기(SVG 필터 — 투명 가리개의 전달 함수)와
 // PC 글꼴(PDF 에 안 박힌 글꼴)을 못 써서, 쪽 그림과 똑같은 모양을 내려면 화면 쪽에서 그려야 한다.
 import { setImageDpi } from './core/imgmeta.js';
+import { runJob } from './jobs.js';
+
+// 바꿀 수 있는 그림 형식: 설정 값(= 파일 확장자) → 화면에 보일 이름
+export const IMAGE_FORMATS = { png: 'PNG', jpg: 'JPG', tif: 'TIFF', webp: 'WEBP' };
+const CANVAS_MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
 
 let mod = null;
 let pdfWorker = null;
@@ -102,7 +107,29 @@ export function imageSize(widthPt, heightPt, dpi) {
 
 const cancelledError = () => Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
 
-// 쪽 하나를 그림 파일로. type: 'png' | 'jpg'. 돌려주는 것: { blob, width, height, dpi, lowered }
+// 다 그린 그림판 → 그림 파일(Blob). PNG·JPG·WEBP 는 브라우저가, TIFF 는 작업 일꾼이 화소를 받아 만든다.
+// PNG·JPG 에는 해상도를 적어 넣는다(TIFF 는 만들 때 적고, WEBP 에는 해상도 칸이 없다)
+async function encodeCanvas(canvas, type, dpi, quality, signal) {
+  if (type === 'tif') {
+    const { data, width, height } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+    const job = runJob('tiff', { pixels: data.buffer, width, height, dpi }, { transfer: [data.buffer] });
+    const stop = () => job.cancel();
+    if (signal) signal.addEventListener('abort', stop, { once: true });
+    try {
+      return (await job.promise).blob;
+    } finally {
+      if (signal) signal.removeEventListener('abort', stop);
+    }
+  }
+  const mime = CANVAS_MIME[type];
+  const blob = await new Promise((res) => canvas.toBlob(res, mime, quality));
+  if (!blob) throw Object.assign(new Error('그림을 만들지 못했습니다(쪽이 너무 크거나 메모리가 모자랍니다)'), { code: 'encode' });
+  // 못 만드는 형식이면 브라우저가 말없이 PNG 로 준다
+  if (blob.type !== mime) throw Object.assign(new Error(`이 브라우저는 ${IMAGE_FORMATS[type]} 그림을 만들지 못합니다`), { code: 'format' });
+  return new Blob([setImageDpi(new Uint8Array(await blob.arrayBuffer()), dpi)], { type: mime });
+}
+
+// 쪽 하나를 그림 파일로. type: IMAGE_FORMATS 의 값. 돌려주는 것: { blob, width, height, dpi, lowered }
 export async function renderPageImage(h, pageNo, { dpi = 150, type = 'png', quality = 0.92, signal = null } = {}) {
   const pdfjs = await lib();
   if (signal && signal.aborted) throw cancelledError();
@@ -131,11 +158,8 @@ export async function renderPageImage(h, pageNo, { dpi = 150, type = 'png', qual
     } finally {
       if (signal) signal.removeEventListener('abort', stop);
     }
-    const mime = type === 'jpg' ? 'image/jpeg' : 'image/png';
-    const blob = await new Promise((res) => canvas.toBlob(res, mime, quality));
-    if (!blob) throw Object.assign(new Error('그림을 만들지 못했습니다(쪽이 너무 크거나 메모리가 모자랍니다)'), { code: 'encode' });
-    const bytes = setImageDpi(new Uint8Array(await blob.arrayBuffer()), size.dpi);
-    return { blob: new Blob([bytes], { type: mime }), width: size.width, height: size.height, dpi: size.dpi, lowered: size.lowered };
+    const blob = await encodeCanvas(canvas, type, size.dpi, quality, signal);
+    return { blob, width: size.width, height: size.height, dpi: size.dpi, lowered: size.lowered };
   } finally {
     canvas.width = canvas.height = 0;
     page.cleanup();

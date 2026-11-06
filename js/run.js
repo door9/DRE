@@ -6,8 +6,8 @@ import { runJob, cancelAll } from './jobs.js';
 import { prepareSave, saveOutput, textBlob } from './save.js';
 import { render, formatRange } from './core/model.js';
 import { engine, engineReady, launchEngine, engineCan } from './engine.js';
-import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF, TO_IMAGE } from './core/detect.js';
-import { openThumbDoc, renderPageImage } from './thumbs.js';
+import { OFFICE, IMAGES, TEXTABLE, ENGINE_PDF, TO_IMAGE, SHEETS, SLIDES } from './core/detect.js';
+import { openThumbDoc, renderPageImage, IMAGE_FORMATS } from './thumbs.js';
 import { baseName, fmtNum, toast } from './util.js';
 
 let abort = null;
@@ -17,7 +17,7 @@ let starting = false; // DRE.exe 켜기·폴더 권한을 기다리는 동안 �
 export function whyNot(it, mode) {
   if (it.kind === 'unknown') return '알 수 없는 형식입니다';
   // 목록 줄에 뜨는 글이라 짧게(휴대폰 폭에서 줄이 넘치지 않게) — 자세한 안내는 오른쪽 패널에
-  if (mode === 'convert' && !TO_IMAGE.has(it.kind)) return 'PDF·한글·워드만 바꿀 수 있습니다';
+  if (mode === 'convert' && !TO_IMAGE.has(it.kind)) return '이미 그림 파일입니다';
   if (it.probeError === 'broken') return it.probeMsg || '파일이 손상된 것 같습니다';
   if (it.probeError === 'password' && it.kind !== 'pdf') return '암호가 걸린 문서입니다';
   if (it.probeError === 'distribution' && mode === 'text') return null; // 배포용 한글: DRE.exe로 PDF를 만든 뒤 뽑는다(produce.js)
@@ -35,8 +35,8 @@ export function runnable(mode) {
   return store.items.filter((it) => !whyNot(it, mode));
 }
 
-// 형식 변환으로 만들 그림 수(고른 쪽, 안 골랐으면 전체 쪽). approx: 쪽 수를 어림한 한글·워드 문서를 전체로 넣었는가
-// (DRE 가 PDF 를 만들어 쪽 그림을 보여 주면 정확해진다)
+// 형식 변환으로 만들 그림 수(고른 쪽, 안 골랐으면 전체 쪽). approx: 쪽 수를 어림한 문서(한글·워드·전자책, 시트 수만 아는 엑셀)를
+// 전체로 넣었는가(DRE 가 PDF 를 만들어 쪽 그림을 보여 주면 정확해진다)
 export function imageCount() {
   let n = 0, approx = false;
   for (const it of runnable('convert')) {
@@ -79,7 +79,7 @@ export async function runAll() {
 
 async function runInner(mode, items) {
 
-  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만. 형식 변환은 한글·워드 문서만)
+  // DRE.exe가 필요한데 꺼져 있으면 지금 켠다(글 뽑기는 앱이 직접 못 읽는 것과, 쪽을 맞출 문서만. 형식 변환은 PDF 가 아닌 문서만)
   const wantEngine = items.some((it) => (mode === 'text' ? textNeedsEngine(it) : mode === 'convert' ? it.kind !== 'pdf' : needsEngine(it)));
   let enginePromise = null;
   if (wantEngine && !engineReady()) enginePromise = launchEngine();
@@ -100,7 +100,7 @@ async function runInner(mode, items) {
       const hard = mode !== 'text' || items.some((it) => (OFFICE.has(it.kind) && !TEXTABLE.has(it.kind)) || it.probeError === 'distribution');
       if (hard) {
         toast(mode === 'text' ? 'DRE를 켜지 못해 옛 한글·배포용 문서는 건너뜁니다.'
-          : mode === 'convert' ? 'DRE를 켜지 못했습니다. 한글·워드 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드·전자책 문서는 건너뜁니다.', { bad: true, ms: 6000 });
+          : mode === 'convert' ? 'DRE를 켜지 못했습니다. PDF가 아닌 문서는 건너뜁니다.' : 'DRE를 켜지 못했습니다. 한글·워드·전자책 문서는 건너뜁니다.', { bad: true, ms: 6000 });
         import('./ui/dialogs.js').then((m) => m.openEngineDialog());
       } else toast('DRE를 켜지 못해 쪽 나눔은 문서 안 정보로 어림합니다.', { ms: 5000 });
     }
@@ -203,19 +203,29 @@ async function textOne(it, session) {
   return { saved, blob, msg, warn: warn ? `${warn} (저장: ${saved.name})` : null };
 }
 
+// 이 문서의 PDF 를 만드는 프로그램(워드 문서는 워드가 없으면 한글이 연다 — DRE.cs Pick)
+function pdfMaker(it) {
+  if (it.kind.startsWith('hwp')) return '한글로';
+  if (it.kind === 'epub') return engine.browserName === '크롬' ? '크롬으로' : `${engine.browserName || '엣지'}로`;
+  if (SHEETS.has(it.kind)) return '엑셀로';
+  if (SLIDES.has(it.kind)) return '파워포인트로';
+  return engine.apps && engine.apps.word === false ? '한글로' : '워드로';
+}
+
 // 형식 변환: PDF 쪽 → 그림 파일(쪽마다 하나). 한 쪽씩 그려 바로 저장한다(쪽이 많아도 메모리에 쌓이지 않게).
-// 한글·워드 문서는 DRE.exe 가 이 PC 의 한글·워드로 만든 PDF 에서 그린다(쪽 그림을 볼 때 만든 PDF 가 있으면 그것을 다시 쓴다).
+// PDF 가 아닌 문서는 DRE.exe 가 이 PC 의 한글·워드·엑셀·파워포인트(전자책은 엣지)로 만든 PDF 에서 그린다(쪽 그림을 볼 때 만든 PDF 가 있으면 그것을 다시 쓴다).
 // 한 쪽을 못 그려도 나머지는 이어서 하고 끝에 알린다. 멈추거나 실패하면 그때까지 저장한 장 수를 오류에 붙인다(e.saved)
 async function imagesOne(it, session) {
   const signal = abort.signal;
-  const ext = settings.convert.to === 'jpg' ? 'jpg' : 'png';
+  const ext = IMAGE_FORMATS[settings.convert.to] ? settings.convert.to : 'png';
   const dpi = settings.convert.dpi || 150;
   const cancelled = () => Object.assign(new Error('취소했습니다'), { code: 'cancelled' });
   const isPdf = it.kind === 'pdf';
+  // 엑셀은 PDF 를 만들기 전까지 시트 번호로 고른다 — 한 시트가 여러 쪽이면 번호가 어긋나므로 끝에 알린다
+  const sheetsPicked = it.range && it.sheetPages && !it.pdfPages ? it.pages : 0;
   let src = it.file;
   if (!isPdf) {
-    const app = it.kind.startsWith('hwp') ? '한글' : '워드';
-    src = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : `${app}로 PDF 만드는 중` }) });
+    src = await ensurePdf(it, { signal, onState: (s) => updateItem(it, { msg: s === 'engine-wait' ? '차례 기다리는 중' : s === 'pack' ? '전자책 묶는 중' : `${pdfMaker(it)} PDF 만드는 중` }) });
   }
   updateItem(it, { msg: 'PDF 여는 중' });
   let hd;
@@ -231,7 +241,7 @@ async function imagesOne(it, session) {
   const names = [], failed = [];
   try {
     const total = hd.pages;
-    // 한글·워드는 쪽 수를 어림했었다 — 실제 PDF 쪽 수로 바로잡는다
+    // 문서의 쪽 수는 어림이었다 — 실제 PDF 쪽 수로 바로잡는다
     if (isPdf ? !it.pages : it.pdfPages !== total) updateItem(it, isPdf ? { pages: total, pageExact: true } : { pdfPages: total, pages: total, pageExact: true });
     const want = it.range || Array.from({ length: total }, (_, i) => i + 1);
     const pages = want.filter((n) => n >= 1 && n <= total);
@@ -247,6 +257,7 @@ async function imagesOne(it, session) {
         r = await renderPageImage(hd, n, { dpi, type: ext, signal });
       } catch (e) {
         if (e.code === 'cancelled' || signal.aborted) throw cancelled();
+        if (e.code === 'format') throw e; // 어느 쪽이든 마찬가지
         console.warn(`${n}쪽 그림 실패`, e);
         failed.push(n);
         continue;
@@ -261,7 +272,8 @@ async function imagesOne(it, session) {
     let msg = `저장: ${names[0]}${names.length > 1 ? ` 외 ${fmtNum(names.length - 1)}장` : ''}`;
     if (minDpi < dpi) msg += ` · 큰 쪽은 약 ${Math.floor(minDpi)}dpi로 낮춤`;
     const warn = failed.length ? `${formatRange(failed)}쪽은 그리지 못했습니다 (${msg})`
-      : missing.length ? `${formatRange(missing)}쪽은 문서에 없어 건너뛰었습니다(전체 ${total}쪽) (${msg})` : null;
+      : missing.length ? `${formatRange(missing)}쪽은 문서에 없어 건너뛰었습니다(전체 ${total}쪽) (${msg})`
+        : sheetsPicked && sheetsPicked !== total ? `시트 번호가 아니라 인쇄 쪽 번호로 골랐습니다(시트 ${sheetsPicked}개, 전체 ${total}쪽) (${msg})` : null;
     return { msg, warn, count: names.length, blob: one };
   } catch (e) {
     e.saved = names.length;

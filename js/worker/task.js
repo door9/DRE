@@ -330,6 +330,12 @@ const handlers = {
     const out = await imageToPdf(await loadPdfLib(), await bytesOf(m), IMAGE_MIME[m.kind] || m.mime, { title: m.title });
     return { blob: new Blob([out], { type: 'application/pdf' }) };
   },
+
+  // 쪽 화소(RGBA) → TIFF(형식 변환). 큰 쪽은 압축에 몇 초 걸려 화면이 멈추지 않게 여기서 한다
+  async tiff(m) {
+    const { encodeTiff } = await import('../core/tiff.js');
+    return { blob: new Blob([encodeTiff(new Uint8Array(m.pixels), m.width, m.height, m.dpi)], { type: 'image/tiff' }) };
+  },
 };
 
 self.onmessage = async (e) => {

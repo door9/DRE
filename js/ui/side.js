@@ -5,7 +5,7 @@ import { h, ico, esc, fmtNum, infoToggle, toast, debounce, baseName } from '../u
 import { parseRange, formatRange, render } from '../core/model.js';
 import { IMAGES, ENGINE_PDF, SHEETS, SLIDES, TO_IMAGE, kindLabel } from '../core/detect.js';
 import { ensurePdf, ensureText } from '../produce.js';
-import { openThumbDoc, renderThumb, imageSize } from '../thumbs.js';
+import { openThumbDoc, renderThumb, imageSize, IMAGE_FORMATS } from '../thumbs.js';
 import { engine, engineReady, launchEngine, onEngine, aiLogin } from '../engine.js';
 import { mergeName, runnable } from '../run.js';
 import { prepareSave, saveOutput, textBlob } from '../save.js';
@@ -36,7 +36,7 @@ function rangeSection(it, { open = true } = {}) {
     h('button.btn.tiny', { type: 'button', text: '홀수', onclick: () => commitFn((n) => n % 2 === 1) }),
     h('button.btn.tiny', { type: 'button', text: '짝수', onclick: () => commitFn((n) => n % 2 === 0) }),
     status,
-    infoToggle('<p>쪽 그림을 누르면 고르거나 뺍니다. <b>Shift</b>를 누른 채 누르면 사이의 쪽을 한꺼번에 고릅니다.</p><p>칸에 직접 적어도 됩니다: <code>1-3, 5, 8-</code>(8쪽부터 끝까지).</p><p>한글·워드 문서의 쪽 그림은 DRE가 PDF로 바꿔 보여 줍니다.</p>'),
+    infoToggle('<p>쪽 그림을 누르면 고르거나 뺍니다. <b>Shift</b>를 누른 채 누르면 사이의 쪽을 한꺼번에 고릅니다.</p><p>칸에 직접 적어도 됩니다: <code>1-3, 5, 8-</code>(8쪽부터 끝까지).</p><p>PDF가 아닌 문서의 쪽 그림은 DRE가 PDF로 바꿔 보여 줍니다.</p>'),
   );
   wrap.append(head);
   const grid = h('div.thumbs');
@@ -337,7 +337,7 @@ function mergeSection() {
   );
 }
 
-// ─── 형식 변환(PDF 쪽 → 그림) ───
+// ─── 형식 변환(문서 쪽 → 그림) ───
 function convertBar() {
   const c = settings.convert;
   const seg = (key, opts) => {
@@ -350,14 +350,27 @@ function convertBar() {
     return box;
   };
   return h('div.textbar', { 'data-info-host': '' },
-    h('span.field', {}, h('span', { text: '바꿀 형식' }), seg('to', [['png', 'PNG'], ['jpg', 'JPG']])),
+    h('span.field', {}, h('span', { text: '바꿀 형식' }), seg('to', Object.entries(IMAGE_FORMATS))),
     h('span.field', {}, h('span', { text: '해상도' }), seg('dpi', [[96, '96'], [150, '150'], [300, '300'], [600, '600']]), h('span.muted.small', { text: 'dpi' })),
     h('span.stat.px-size'),
-    infoToggle(`<p><b>PNG</b>는 글자·표·선이 또렷하고, <b>JPG</b>는 사진이 많은 쪽에 알맞고 파일이 작습니다.</p>
-      <p><b>해상도</b>: 화면에서 보거나 메신저로 보낼 때는 150, 인쇄하거나 크게 확대해 볼 때는 300을 고르세요. 600은 파일이 아주 큽니다.</p>
-      <p>그림에 해상도를 적어 두므로 한글·워드에 넣으면 원래 종이 크기로 들어갑니다.</p>
-      <p>쪽마다 그림 파일 하나로 저장합니다(이름 뒤에 '(3쪽)'). 쪽을 고르지 않으면 모든 쪽을 바꿉니다.</p>
-      <p><b>한글·워드 문서</b>는 DRE가 이 PC의 한글·워드로 PDF를 만든 뒤 그 쪽을 그립니다(DRE가 켜져 있어야 합니다). 쪽 그림도 그 PDF로 보여 줍니다.</p>`),
+    infoToggle(`<p><b>□ 바꿀 수 있는 문서</b><br>
+      · PDF·한글·워드·엑셀·파워포인트·RTF·ODT·전자책(EPUB)<br>
+      · PDF가 아닌 문서는 DRE가 이 PC의 프로그램으로 PDF를 만든 뒤 그 쪽을 그림(DRE를 켜 두어야 함)<br>
+      · 엑셀은 인쇄할 때의 쪽 나눔대로, 전자책은 A4 쪽으로 나뉨</p>
+      <p><b>□ 그림 형식</b><br>
+      · PNG: 글자·표·선이 또렷함<br>
+      · JPG: 사진이 많은 쪽에 알맞고 파일이 작음<br>
+      · TIFF: 화질 손실이 없어 인쇄·보관에 알맞음<br>
+      · WEBP: 웹에 올릴 때 알맞고 파일이 가장 작음(한글에는 못 넣음)</p>
+      <p><b>□ 해상도</b><br>
+      · 150: 화면으로 보거나 메신저로 보낼 때<br>
+      · 300: 인쇄하거나 크게 확대해 볼 때<br>
+      · 600: 파일이 아주 큼<br>
+      · PNG·JPG·TIFF는 해상도를 적어 두어 워드에 넣으면 원래 종이 크기로 들어감<br>
+      · 한글은 해상도를 쓰지 않아 넣은 뒤 크기를 맞춰야 함</p>
+      <p><b>□ 저장</b><br>
+      · 쪽마다 그림 파일 하나(이름 뒤에 '(3쪽)')<br>
+      · 쪽을 고르지 않으면 모든 쪽</p>`),
   );
 }
 
@@ -402,12 +415,12 @@ export function renderSide() {
   if (mode === 'convert') {
     box.append(convertBar());
     if (!it) {
-      box.append(h('div.side-note', { html: 'PDF·한글·워드 문서의 쪽을 그림 파일(PNG·JPG)로 바꿉니다.<br>파일을 고르면 쪽을 골라 바꿀 수 있습니다.' }));
+      box.append(h('div.side-note', { html: 'PDF·한글·워드·엑셀·파워포인트 문서와 전자책(EPUB)의 쪽을 그림 파일(PNG·JPG·TIFF·WEBP)로 바꿉니다.<br>파일을 고르면 쪽을 골라 바꿀 수 있습니다.' }));
       return;
     }
     box.append(h('div.side-head', {}, h('h2', { text: it.name, title: it.name })));
     const body = h('div.side-body');
-    body.append(TO_IMAGE.has(it.kind) ? rangeSection(it, { open: true }) : h('div.side-note.small', { text: 'PDF·한글·워드 문서만 그림으로 바꿀 수 있습니다.' }));
+    body.append(TO_IMAGE.has(it.kind) ? rangeSection(it, { open: true }) : h('div.side-note.small', { text: '이미 그림 파일입니다. 그림으로 바꿀 문서를 넣어 주세요.' }));
     box.append(body);
     return;
   }

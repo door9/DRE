@@ -20,7 +20,7 @@ const DEFAULTS = {
   eol: 'crlf',             // 줄 끝: crlf(윈도우) | lf
   bom: true,               // UTF-8 표시(BOM) — 한글·메모장 등에서 글자가 안 깨지게
   merge: { outline: true },
-  convert: { to: 'png', dpi: 150 }, // 형식 변환: 바꿀 형식(png | jpg)·해상도(dpi)
+  convert: { to: 'png', dpi: 150 }, // 형식 변환: 바꿀 형식(png | jpg | tif | webp)·해상도(dpi)
   theme: 'auto',
 };
 
